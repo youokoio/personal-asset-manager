@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#17324d">
+<meta name="description" content="端末内で管理する個人用資産管理アプリ">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="stylesheet" href="./styles.css">
+<title>資産管理</title>
+</head>
+<body>
+<header><div><div class="eyebrow">PERSONAL ASSET MANAGER</div><h1>資産管理</h1></div><span id="connection" class="status">起動中</span></header>
+<nav aria-label="メインメニュー">
+<button class="tab active" data-tab="home">概要</button>
+<button class="tab" data-tab="fx">FX建玉</button>
+<button class="tab" data-tab="accounts">口座・残高</button>
+<button class="tab" data-tab="holdings">保有資産</button>
+<button class="tab" data-tab="data">データ管理</button>
+</nav>
+<main>
+<section id="home" class="view">
+<div class="panel"><div class="section-head"><h2>資産管理サマリー</h2><span id="lastSaved" class="muted"></span></div>
+<div class="stats">
+<div class="stat"><span>登録口座</span><strong id="accountCount">—</strong></div>
+<div class="stat"><span>保有FX建玉</span><strong id="positionCount">—</strong></div>
+<div class="stat"><span>保有資産データ</span><strong id="holdingCount">—</strong></div>
+</div>
+<p class="notice">初期データには確認が必要な数値が含まれます。残高・評価額は口座別に表示し、異なる口座の証拠金やロスカット条件を合算しません。</p>
+</div>
+<div class="panel"><h2>FX口座別建玉数</h2><div id="fxSummary" class="list"></div></div>
+<div class="panel"><h2>口座別 最新残高</h2><div id="balanceSummary" class="list"></div></div>
+<div class="panel"><h2>データ保存状態</h2><p id="storageStatus" class="muted">確認中</p></div>
+</section>
+
+<section id="fx" class="view hidden">
+<div class="section-head"><h2>FX建玉</h2><button class="primary" id="addPosition">＋ 建玉追加</button></div>
+<p class="notice">数量やスワップ等は建玉ごとに編集できます。数量の単位はJSONの元データに合わせて保持します。入力値の単位を必ず確認してください。</p>
+<div id="positionList" class="panel list"></div>
+</section>
+
+<section id="accounts" class="view hidden">
+<div class="section-head"><h2>口座・残高</h2><button class="primary" id="addAccount">＋ 口座追加</button></div>
+<div id="accountList" class="panel list"></div>
+<div class="section-head"><h2>残高スナップショット</h2><button class="primary" id="addSnapshot">＋ 残高記録</button></div>
+<div id="snapshotList" class="panel list"></div>
+</section>
+
+<section id="holdings" class="view hidden">
+<div class="section-head"><h2>保有資産</h2><button class="primary" id="addHolding">＋ 資産追加</button></div>
+<div id="holdingList" class="panel list"></div>
+</section>
+
+<section id="data" class="view hidden">
+<div class="panel"><h2>JSONデータの取り込み</h2>
+<p class="muted">初期データまたはバックアップを取り込みます。形式検証後、現在のデータを置き換えます。取り込み前にバックアップを作成してください。</p>
+<input type="file" id="importFile" accept=".json,application/json">
+<button class="primary full" id="importBtn">JSONを検証して取り込む</button>
+<div id="importResult" class="muted" aria-live="polite"></div></div>
+<div class="panel"><h2>バックアップ</h2>
+<p class="muted">通常JSONまたはパスワードで暗号化したバックアップを書き出せます。暗号化バックアップのパスワードを忘れると復元できません。</p>
+<button class="full" id="exportJson">通常JSONを書き出す</button>
+<label for="backupPassword">バックアップ用パスワード（暗号化時）</label>
+<input id="backupPassword" type="password" autocomplete="new-password" minlength="12" placeholder="12文字以上">
+<button class="primary full" id="exportEncrypted">暗号化バックアップを書き出す</button>
+<label for="restorePassword">暗号化バックアップの復元パスワード</label>
+<input id="restorePassword" type="password" autocomplete="current-password">
+<button class="full" id="importEncrypted">暗号化バックアップを復元</button>
+<input type="file" id="encryptedFile" accept=".pamenc,.json" class="file-spaced">
+</div>
+<div class="panel"><h2>セキュリティ・アプリ情報</h2>
+<div class="kv"><span>アプリバージョン</span><b id="appVersion">—</b></div>
+<div class="kv"><span>保存方式</span><b>iPhone内 IndexedDB</b></div>
+<div class="kv"><span>外部通信</span><b>通常利用時なし</b></div>
+<div class="kv"><span>オフライン対応</span><b id="offlineState">確認中</b></div>
+<p class="notice">このアプリは通常利用時に外部API・解析サービス・広告・外部CDNへ接続しません。初回公開時の取得、手動アップデート確認、GitHubのTraffic確認には通信が必要です。iOSによるサイトデータ消去・ストレージ削除に備え、定期的に暗号化バックアップを保存してください。</p>
+<button class="full" id="manualUpdate">手動で更新を確認</button>
+<p id="updateStatus" class="muted" aria-live="polite"></p>
+</div>
+<div class="panel"><h2>データの初期化</h2><p class="muted">端末内の全データを削除します。必ず先にバックアップしてください。</p><button class="danger full" id="resetBtn">全データを削除</button></div>
+</section>
+
+<dialog id="editorDialog"><form id="editorForm" method="dialog">
+<div class="section-head"><h2 id="editorTitle">編集</h2><button type="button" class="icon-btn" id="closeDialog">閉じる</button></div>
+<div id="editorFields" class="form-grid"></div>
+<div class="dialog-actions"><button type="button" class="danger" id="deleteRecord">削除</button><button type="submit" class="primary">保存</button></div>
+</form></dialog>
+</main>
+<footer>Personal Asset Manager <span id="footerVersion"></span> · データはこの端末内に保存</footer>
+<script src="./app.js" defer></script>
+</body></html>

@@ -1,0 +1,12 @@
+{
+  "name": "Personal Asset Manager",
+  "short_name": "資産管理",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f2f5f8",
+  "theme_color": "#17324d",
+  "description": "端末内で管理する個人用資産管理アプリ",
+  "icons": []
+}
