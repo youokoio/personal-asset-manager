@@ -15,6 +15,7 @@
 <nav aria-label="メインメニュー">
 <button class="tab active" data-tab="home">概要</button>
 <button class="tab" data-tab="fx">FX建玉</button>
+<button class="tab" data-tab="cash">入出金・手数料</button>
 <button class="tab" data-tab="accounts">口座・残高</button>
 <button class="tab" data-tab="holdings">保有資産</button>
 <button class="tab" data-tab="timeline">時系列履歴</button>
@@ -40,6 +41,17 @@
 <div class="section-head"><h2>FX建玉</h2><button class="primary" id="addPosition">＋ 建玉追加</button></div>
 <p class="notice">数量やスワップ等は建玉ごとに編集できます。数量の単位はJSONの元データに合わせて保持します。入力値の単位を必ず確認してください。</p>
 <div id="positionList" class="panel list"></div>
+</section>
+
+<section id="cash" class="view hidden">
+<div class="panel">
+<div class="section-head"><h2>入出金・口座間振替</h2><button class="primary" id="addCashTransaction">＋ 入出金を登録</button></div>
+<p class="notice">口座間振替は元口座・先口座を指定すると1件の履歴から両口座へ自動反映します。外部からの入金・外部への出金は単独で登録できます。手数料は別記録として保持し、残高へ反映します。</p>
+<div id="cashSummary" class="stats"></div>
+<div id="cashAccountSummary" class="list"></div>
+<div id="cashTransactionList" class="list"></div>
+</div>
+<div class="panel"><div class="section-head"><h2>手数料履歴</h2><span id="feeCount" class="muted"></span></div><div id="feeList" class="list"></div></div>
 </section>
 
 <section id="accounts" class="view hidden">
@@ -120,6 +132,26 @@
 </div>
 <div id="timelineAudit" class="muted"></div><div id="timelineRevisionList" class="list"></div>
 <div class="dialog-actions"><button type="button" class="danger" id="deleteTimeline">論理削除</button><button type="submit" class="primary">保存</button></div>
+</form></dialog>
+
+<dialog id="cashDialog"><form id="cashForm" method="dialog">
+<div class="section-head"><h2 id="cashTitle">入出金・振替</h2><button type="button" class="icon-btn" id="closeCash">閉じる</button></div>
+<div class="form-grid">
+<div class="field"><label for="cashType">登録方法</label><select id="cashType"><option value="transfer">口座間振替（自動連携）</option><option value="deposit">単独入金（外部から）</option><option value="withdrawal">単独出金（外部へ）</option><option value="fee">手数料のみ登録</option></select></div>
+<div class="field"><label for="cashDate">発生日</label><input id="cashDate" type="date" required></div>
+<div class="field" id="cashSourceWrap"><label for="cashSource">振替元・出金元口座</label><select id="cashSource"></select></div>
+<div class="field" id="cashTargetWrap"><label for="cashTarget">振替先・入金先口座</label><select id="cashTarget"></select></div>
+<div class="field hidden" id="cashAccountWrap"><label for="cashAccount">対象口座</label><select id="cashAccount"></select></div>
+<div class="field" id="cashAmountWrap"><label for="cashAmount">振替額・入出金額</label><input id="cashAmount" type="number" inputmode="decimal" step="any" min="0"></div>
+<div class="field"><label for="cashFee">手数料（通貨単位）</label><input id="cashFee" type="number" inputmode="decimal" step="any" min="0" value="0"></div>
+<div class="field"><label for="cashFeeCategory">手数料の種類</label><select id="cashFeeCategory"><option value="transfer">振込・振替手数料</option><option value="deposit">入金手数料</option><option value="withdrawal">出金手数料</option><option value="trading">売買手数料</option><option value="crypto">暗号資産取引手数料</option><option value="other">その他</option></select></div>
+<div class="field"><label for="cashFeeAccount">手数料の負担口座</label><select id="cashFeeAccount"></select></div>
+<div class="field"><label for="cashFeeMode">手数料の扱い</label><select id="cashFeeMode"><option value="additional">別途差し引く（手数料分も口座残高に反映）</option><option value="deducted">入出金額から差し引く</option></select></div>
+<div class="field"><label for="cashCurrency">通貨</label><select id="cashCurrency"><option value="JPY">JPY</option><option value="BTC">BTC</option><option value="SOL">SOL</option></select></div>
+<div class="field full-width"><label for="cashMemo">摘要・メモ</label><input id="cashMemo" type="text" maxlength="500"></div>
+</div>
+<p id="cashPreview" class="notice"></p><div id="cashAudit" class="muted"></div>
+<div class="dialog-actions"><button type="button" class="danger" id="deleteCash">削除</button><button type="submit" class="primary">保存</button></div>
 </form></dialog>
 
 <dialog id="editorDialog"><form id="editorForm" method="dialog">

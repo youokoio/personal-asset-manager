@@ -22,3 +22,6 @@ dialog{border:0;border-radius:15px;width:min(94vw,620px);max-height:88vh;padding
 @media(max-width:420px){.stats{gap:5px}.stat{padding:8px}.stat strong{font-size:18px}.form-grid{grid-template-columns:1fr}.field.full-width{grid-column:auto}}
 .subheading{font-size:13px;margin:12px 0 4px;color:#35495c}
 #timelineRevisionList{max-height:220px;overflow:auto;margin-top:8px}
+
+input[readonly]{background:#f1f3f5;color:#596674}
+#cashAccountSummary{margin:10px 0 4px}

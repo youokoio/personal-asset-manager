@@ -1,4 +1,4 @@
-const CACHE='pam-shell-v0.4.0-alpha1';
+const CACHE='pam-shell-v0.5.0-alpha1';
 const FILES=['./','./index.html','./styles.css','./app.js','./manifest.webmanifest','./README.md'];
 self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES)));});
 self.addEventListener('activate',event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));});
