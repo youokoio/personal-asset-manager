@@ -17,6 +17,7 @@
 <button class="tab" data-tab="fx">FX建玉</button>
 <button class="tab" data-tab="accounts">口座・残高</button>
 <button class="tab" data-tab="holdings">保有資産</button>
+<button class="tab" data-tab="history">保存履歴</button>
 <button class="tab" data-tab="data">データ管理</button>
 </nav>
 <main>
@@ -50,6 +51,12 @@
 <section id="holdings" class="view hidden">
 <div class="section-head"><h2>保有資産</h2><button class="primary" id="addHolding">＋ 資産追加</button></div>
 <div id="holdingList" class="panel list"></div>
+</section>
+
+<section id="history" class="view hidden">
+<div class="panel"><div class="section-head"><h2>保存・訂正履歴</h2><span id="historyCount" class="muted"></span></div>
+<p class="notice">過去の保存内容を確認し、選んだ時点の内容を編集画面に呼び出せます。訂正前の値も履歴に残ります。</p>
+<div id="historyList" class="list"></div></div>
 </section>
 
 <section id="data" class="view hidden">
