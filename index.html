@@ -17,7 +17,8 @@
 <button class="tab" data-tab="fx">FX建玉</button>
 <button class="tab" data-tab="accounts">口座・残高</button>
 <button class="tab" data-tab="holdings">保有資産</button>
-<button class="tab" data-tab="history">保存履歴</button>
+<button class="tab" data-tab="timeline">時系列履歴</button>
+<button class="tab" data-tab="history">操作履歴</button>
 <button class="tab" data-tab="data">データ管理</button>
 </nav>
 <main>
@@ -51,6 +52,18 @@
 <section id="holdings" class="view hidden">
 <div class="section-head"><h2>保有資産</h2><button class="primary" id="addHolding">＋ 資産追加</button></div>
 <div id="holdingList" class="panel list"></div>
+</section>
+
+<section id="timeline" class="view hidden">
+<div class="section-head"><h2>時系列履歴</h2><button class="primary" id="addTimeline">＋ 履歴を追加</button></div>
+<div class="panel">
+<p class="muted">残高・建玉・スワップ・決済・証券評価額などを、実際に有効だった日時で登録します。登録日時とは分けて保存し、各記録を個別に参照・修正できます。</p>
+<div class="form-grid">
+<div class="field"><label for="timelineFilterType">記録種別</label><select id="timelineFilterType"><option value="">すべて</option><option value="account_snapshot">口座スナップショット</option><option value="bank_balance">銀行残高</option><option value="fx_position">FX建玉更新</option><option value="fx_swap">FXスワップ</option><option value="fx_settlement">FX決済</option><option value="securities_snapshot">証券評価額</option><option value="contribution">入出金・積立</option><option value="mortgage">住宅ローン</option><option value="other">その他</option></select></div>
+<div class="field"><label for="timelineSearch">検索</label><input id="timelineSearch" type="search" placeholder="口座・建玉・メモ"></div>
+</div>
+<div id="timelineList" class="list"></div>
+</div>
 </section>
 
 <section id="history" class="view hidden">
@@ -87,6 +100,27 @@
 </div>
 <div class="panel"><h2>データの初期化</h2><p class="muted">端末内の全データを削除します。必ず先にバックアップしてください。</p><button class="danger full" id="resetBtn">全データを削除</button></div>
 </section>
+
+<dialog id="timelineDialog"><form id="timelineForm" method="dialog">
+<div class="section-head"><h2 id="timelineTitle">時系列記録</h2><button type="button" class="icon-btn" id="closeTimeline">閉じる</button></div>
+<div class="form-grid">
+<div class="field"><label for="tlType">記録種別</label><select id="tlType"><option value="account_snapshot">口座スナップショット</option><option value="bank_balance">銀行残高</option><option value="fx_position">FX建玉更新</option><option value="fx_swap">FXスワップ</option><option value="fx_settlement">FX決済</option><option value="securities_snapshot">証券評価額</option><option value="contribution">入出金・積立</option><option value="mortgage">住宅ローン</option><option value="other">その他</option></select></div>
+<div class="field"><label for="tlEffectiveAt">有効日時（実績日時）</label><input id="tlEffectiveAt" type="datetime-local" required></div>
+<div class="field"><label for="tlAccount">口座</label><select id="tlAccount"></select></div>
+<div class="field"><label for="tlEntity">対象ID（任意）</label><input id="tlEntity" type="text" placeholder="建玉ID・商品IDなど"></div>
+<div class="field"><label for="tlAmount">金額・残高（円）</label><input id="tlAmount" type="number" step="any" inputmode="decimal"></div>
+<div class="field"><label for="tlQuantity">数量</label><input id="tlQuantity" type="number" step="any" inputmode="decimal"></div>
+<div class="field"><label for="tlRate">レート・単価</label><input id="tlRate" type="number" step="any" inputmode="decimal"></div>
+<div class="field"><label for="tlProfitLoss">損益（円）</label><input id="tlProfitLoss" type="number" step="any" inputmode="decimal"></div>
+<div class="field"><label for="tlSwap">スワップ（円）</label><input id="tlSwap" type="number" step="any" inputmode="decimal"></div>
+<div class="field"><label for="tlValueKind">値の区分</label><select id="tlValueKind"><option value="actual">実績・確定値</option><option value="manual_historical">手入力の過去実績</option><option value="estimate">推定値</option><option value="calculated">計算値</option><option value="simulation">シミュレーション</option></select></div>
+<div class="field"><label for="tlSource">登録元</label><select id="tlSource"><option value="manual">手入力</option><option value="import">インポート</option><option value="estimate">推定計算</option><option value="system">システム</option></select></div>
+<div class="field full-width"><label for="tlMemo">メモ・根拠</label><input id="tlMemo" type="text" maxlength="500"></div>
+<div class="field full-width"><label for="tlReason">今回の修正理由（修正時）</label><input id="tlReason" type="text" maxlength="300"></div>
+</div>
+<div id="timelineAudit" class="muted"></div><div id="timelineRevisionList" class="list"></div>
+<div class="dialog-actions"><button type="button" class="danger" id="deleteTimeline">論理削除</button><button type="submit" class="primary">保存</button></div>
+</form></dialog>
 
 <dialog id="editorDialog"><form id="editorForm" method="dialog">
 <div class="section-head"><h2 id="editorTitle">編集</h2><button type="button" class="icon-btn" id="closeDialog">閉じる</button></div>

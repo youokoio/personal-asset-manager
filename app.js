@@ -1,14 +1,14 @@
 'use strict';
-const APP_VERSION='0.3.0';
+const APP_VERSION='0.4.0-alpha1';
 const DB_NAME='pam_local_v2', STORE='state';
 const $=id=>document.getElementById(id);
 const yen=n=>Number.isFinite(Number(n))?Number(n).toLocaleString('ja-JP')+'円':'—';
 const num=n=>Number.isFinite(Number(n))?Number(n).toLocaleString('ja-JP'):'—';
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const today=()=>new Date().toISOString().slice(0,10);
+const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
 let db, state, editing={type:null,id:null};
 
-const EMPTY={schemaVersion:2,dataType:'personal_asset_manager',exportDate:today(),accounts:[],fxPositions:[],fxTransactions:[],fxSwapRecords:[],holdings:[],balanceSnapshots:[],contributionRecords:[],editHistory:[],importMetadata:{},excelHistoricalDatabase:{},excelSimulationDatabase:{},simulationMetadata:{}};
+const EMPTY={schemaVersion:3,dataType:'personal_asset_manager',exportDate:today(),accounts:[],fxPositions:[],fxTransactions:[],fxSwapRecords:[],holdings:[],balanceSnapshots:[],contributionRecords:[],editHistory:[],timeSeriesRecords:[],timeSeriesRevisions:[],importMetadata:{},excelHistoricalDatabase:{},excelSimulationDatabase:{},simulationMetadata:{}};
 function openDB(){return new Promise((resolve,reject)=>{const r=indexedDB.open(DB_NAME,1);r.onupgradeneeded=()=>r.result.createObjectStore(STORE);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
 function dbGet(){return new Promise((resolve,reject)=>{const r=db.transaction(STORE).objectStore(STORE).get('state');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
 function dbPut(value){return new Promise((resolve,reject)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(value,'state');tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});}
@@ -19,7 +19,7 @@ function validateData(d){
  const pids=new Set();for(const p of d.fxPositions){if(!p||typeof p.positionId!=='string'||!p.positionId)throw Error('建玉IDが不正です。');if(pids.has(p.positionId))throw Error('建玉IDが重複しています: '+p.positionId);pids.add(p.positionId);if(!Number.isFinite(Number(p.remainingQuantity)))throw Error('建玉残数量が数値ではありません: '+p.positionId);}
  return true;
 }
-async function save(){state.exportDate=today();await dbPut(state);$('lastSaved').textContent='保存 '+new Date().toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});render();}
+async function save(){state.exportDate=today();state.schemaVersion=3;await dbPut(state);$('lastSaved').textContent='保存 '+new Date().toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});render();}
 function logEdit(type,id,action,before,after){state.editHistory=Array.isArray(state.editHistory)?state.editHistory:[];state.editHistory.unshift({historyId:newId('history'),timestamp:new Date().toISOString(),recordType:type,recordId:id,action,before:before?structuredClone(before):null,after:after?structuredClone(after):null});if(state.editHistory.length>2000)state.editHistory.length=2000;}
 const typeLabel={account:'口座',position:'FX建玉',snapshot:'残高記録',holding:'保有資産'};
 function recordArray(type){return type==='account'?'accounts':type==='position'?'fxPositions':type==='snapshot'?'balanceSnapshots':'holdings';}
@@ -82,7 +82,7 @@ $('deleteRecord').onclick=async()=>{const {type,id}=editing;if(id===null)return;
 $('closeDialog').onclick=()=>$('editorDialog').close();
 document.addEventListener('click',e=>{const hb=e.target.closest('[data-history-view]');if(hb){const h=(state.editHistory||[]).find(x=>x.historyId===hb.dataset.historyView);if(!h)return;const candidate=hb.dataset.historySide==='before'?h.before:h.after;if(!candidate){alert('選択した履歴内容がありません。');return;}const current=findRecord(h.recordType,h.recordId);const seed=structuredClone(candidate);if(current)seed[recordKey(h.recordType)]=current[recordKey(h.recordType)];openEditor(h.recordType,current?current[recordKey(h.recordType)]:null,seed);return;}const b=e.target.closest('[data-edit]');if(b)openEditor(b.dataset.edit,b.dataset.id);});
 $('addPosition').onclick=()=>openEditor('position');$('addAccount').onclick=()=>openEditor('account');$('addSnapshot').onclick=()=>openEditor('snapshot');$('addHolding').onclick=()=>openEditor('holding');
-document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b));document.querySelectorAll('.view').forEach(x=>x.classList.toggle('hidden',x.id!==b.dataset.tab));});
+document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b));document.querySelectorAll('.view').forEach(x=>x.classList.toggle('hidden',x.id!==b.dataset.tab));if(b.dataset.tab==='timeline')renderTimeline();});
 function download(name,blob){const a=document.createElement('a');const u=URL.createObjectURL(blob);a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1500);}
 $('exportJson').onclick=()=>download('personal_asset_backup_'+today()+'.json',new Blob([JSON.stringify({...state,exportDate:today()},null,2)],{type:'application/json'}));
 async function deriveKey(password,salt){const material=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveKey']);return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:310000,hash:'SHA-256'},material,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);}
@@ -91,10 +91,56 @@ $('importBtn').onclick=async()=>{const f=$('importFile').files[0];if(!f){$('impo
 $('importEncrypted').onclick=async()=>{const f=$('encryptedFile').files[0],pw=$('restorePassword').value;if(!f){alert('暗号化バックアップを選択してください。');return;}try{const p=JSON.parse(await f.text());if(p.format!=='PAM-ENCRYPTED-BACKUP')throw Error('対応していないファイル形式です。');const from=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));const key=await deriveKey(pw,from(p.salt));const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:from(p.iv)},key,from(p.data));const d=JSON.parse(new TextDecoder().decode(plain));validateData(d);if(!confirm('暗号化バックアップを復元し、現在のデータを置き換えますか？'))return;const previousHistory=state.editHistory||[];state={...EMPTY,...d,editHistory:Array.isArray(d.editHistory)?d.editHistory:previousHistory};await save();alert('復元しました。');}catch(e){alert('復元できません：パスワードまたはファイルを確認してください。');}};
 $('resetBtn').onclick=async()=>{if(!confirm('端末内のすべての資産データを削除します。よろしいですか？'))return;state=structuredClone(EMPTY);await save();};
 $('manualUpdate').onclick=async()=>{if(!('serviceWorker'in navigator)){$('updateStatus').textContent='Service Worker非対応です。';return;}try{const reg=await navigator.serviceWorker.getRegistration();if(!reg){$('updateStatus').textContent='Service Workerが未登録です。';return;}await reg.update();$('updateStatus').textContent='更新確認を実行しました。新しい版があれば、現在の画面を閉じて再度開くと反映されます。';}catch(e){$('updateStatus').textContent='更新確認に失敗しました。ネットワーク接続を確認してください。';}};
+
+const timelineTypeLabels={account_snapshot:'口座スナップショット',bank_balance:'銀行残高',fx_position:'FX建玉更新',fx_swap:'FXスワップ',fx_settlement:'FX決済',securities_snapshot:'証券評価額',contribution:'入出金・積立',mortgage:'住宅ローン',other:'その他'};
+let editingTimelineId=null;
+const localDateTimeValue=iso=>{if(!iso)return '';const d=new Date(iso);if(Number.isNaN(d.getTime()))return '';const pad=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;};
+const fromLocalDateTime=value=>{const d=new Date(value);if(Number.isNaN(d.getTime()))throw Error('有効日時を正しく入力してください。');return d.toISOString();};
+const timelineNum=v=>v===null||v===undefined||v===''?null:Number(v);
+function timelineAccountOptions(selected=''){$('tlAccount').innerHTML='';const none=document.createElement('option');none.value='';none.textContent='口座未指定';$('tlAccount').append(none);for(const a of state.accounts){const o=document.createElement('option');o.value=a.accountId;o.textContent=a.accountName||a.accountId;$('tlAccount').append(o);} $('tlAccount').value=selected||'';}
+function timelineTitle(r){return `${timelineTypeLabels[r.recordType]||r.recordType} ・ ${accountName(r.accountId)}${r.entityId?' ・ '+r.entityId:''}`;}
+function renderTimeline(){
+ const type=$('timelineFilterType')?.value||'',q=($('timelineSearch')?.value||'').trim().toLocaleLowerCase('ja');
+ const rows=(state.timeSeriesRecords||[]).filter(r=>!r.deletedAt&&(!type||r.recordType===type)&&(!q||[timelineTitle(r),r.memo,r.entityId,r.recordId].join(' ').toLocaleLowerCase('ja').includes(q))).sort((a,b)=>String(b.effectiveAt).localeCompare(String(a.effectiveAt))||String(b.registeredAt).localeCompare(String(a.registeredAt)));
+ $('timelineList').innerHTML=rows.map(r=>{const v=r.values||{};const effective=new Date(r.effectiveAt).toLocaleString('ja-JP');const registered=new Date(r.registeredAt).toLocaleString('ja-JP');const amount=v.amount===null||v.amount===undefined?'':`金額 ${yen(v.amount)}`;const qv=v.quantity===null||v.quantity===undefined?'':`数量 ${num(v.quantity)}`;const rate=v.rate===null||v.rate===undefined?'':`レート ${num(v.rate)}`;const pl=v.profitLoss===null||v.profitLoss===undefined?'':`損益 ${yen(v.profitLoss)}`;const sw=v.swap===null||v.swap===undefined?'':`スワップ ${yen(v.swap)}`;return `<div class="item"><div class="item-title">${esc(timelineTitle(r))}</div><div class="item-sub">有効日時：${esc(effective)}<br>${[amount,qv,rate,pl,sw].filter(Boolean).join(' ／ ')||'数値項目なし'}<br>登録：${esc(registered)} ・ ${esc({actual:'実績',manual_historical:'手入力過去実績',estimate:'推定',calculated:'計算',simulation:'シミュレーション'}[r.valueKind]||r.valueKind)} ・ ${esc(r.source||'手入力')}${r.memo?'<br>メモ：'+esc(r.memo):''}</div><div class="item-actions"><button data-timeline-open="${esc(r.recordId)}">詳細・修正</button></div></div>`;}).join('')||'<p class="muted">該当する時系列記録はありません。履歴を追加するか、検索条件を変更してください。</p>';
+}
+function openTimelineEditor(id=null){
+ editingTimelineId=id;const r=id?(state.timeSeriesRecords||[]).find(x=>x.recordId===id):null;
+ $('timelineTitle').textContent=r?'時系列履歴の詳細・修正':'時系列履歴を追加';
+ $('tlType').value=r?.recordType||'account_snapshot';$('tlEffectiveAt').value=localDateTimeValue(r?.effectiveAt||new Date().toISOString());
+ timelineAccountOptions(r?.accountId||'');$('tlEntity').value=r?.entityId||'';
+ const v=r?.values||{};$('tlAmount').value=v.amount??'';$('tlQuantity').value=v.quantity??'';$('tlRate').value=v.rate??'';$('tlProfitLoss').value=v.profitLoss??'';$('tlSwap').value=v.swap??'';
+ $('tlValueKind').value=r?.valueKind||'actual';$('tlSource').value=r?.source||'manual';$('tlMemo').value=r?.memo||'';$('tlReason').value='';
+ const revisions=(state.timeSeriesRevisions||[]).filter(x=>x.recordId===id).length;
+ $('timelineAudit').textContent=r?`記録ID：${r.recordId} ／ 登録日時：${new Date(r.registeredAt).toLocaleString('ja-JP')} ／ 最終修正：${new Date(r.updatedAt||r.registeredAt).toLocaleString('ja-JP')} ／ 修正履歴：${revisions}件`:'新規記録です。登録日時は保存時に自動記録されます。';
+ const revs=(state.timeSeriesRevisions||[]).filter(x=>x.recordId===id).slice(0,10);
+ $('timelineRevisionList').innerHTML=revs.length?'<h3 class="subheading">この記録の変更履歴</h3>'+revs.map(x=>{const old=x.before||{},next=x.after||{};const val=z=>{const w=z.values||{};return [w.amount!=null?'金額 '+yen(w.amount):'',w.quantity!=null?'数量 '+num(w.quantity):'',w.rate!=null?'レート '+num(w.rate):'',w.profitLoss!=null?'損益 '+yen(w.profitLoss):'',w.swap!=null?'スワップ '+yen(w.swap):''].filter(Boolean).join(' ／ ')||'数値項目なし';};return `<div class="item"><div class="item-title">${esc({create:'新規登録',edit:'修正',logical_delete:'論理削除'}[x.action]||x.action)} ・ ${esc(new Date(x.changedAt).toLocaleString('ja-JP'))}</div><div class="item-sub">変更前：${esc(x.before?val(old):'—')}<br>変更後：${esc(x.after?val(next):'—')}${x.reason?'<br>理由：'+esc(x.reason):''}</div></div>`;}).join(''):'<p class="muted">この記録の変更履歴はまだありません。</p>';
+ $('deleteTimeline').classList.toggle('hidden',!r||!!r.deletedAt);$('timelineDialog').showModal();
+}
+function addTimelineRevision(recordId,action,before,after,reason=''){
+ state.timeSeriesRevisions=Array.isArray(state.timeSeriesRevisions)?state.timeSeriesRevisions:[];
+ state.timeSeriesRevisions.unshift({revisionId:newId('rev'),recordId,action,changedAt:new Date().toISOString(),reason:reason||'',before:before?structuredClone(before):null,after:after?structuredClone(after):null});
+}
+$('timelineForm').addEventListener('submit',async e=>{
+ e.preventDefault();try{
+ const now=new Date().toISOString(),id=editingTimelineId;
+ const before=id?(state.timeSeriesRecords||[]).find(x=>x.recordId===id):null;
+ const record={recordId:id||newId('ts'),recordType:$('tlType').value,accountId:$('tlAccount').value||null,entityId:$('tlEntity').value.trim()||null,effectiveAt:fromLocalDateTime($('tlEffectiveAt').value),registeredAt:before?.registeredAt||now,updatedAt:now,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'Asia/Tokyo',valueKind:$('tlValueKind').value,source:$('tlSource').value,values:{amount:timelineNum($('tlAmount').value),quantity:timelineNum($('tlQuantity').value),rate:timelineNum($('tlRate').value),profitLoss:timelineNum($('tlProfitLoss').value),swap:timelineNum($('tlSwap').value)},memo:$('tlMemo').value.trim(),deletedAt:null};
+ if(before){const idx=state.timeSeriesRecords.findIndex(x=>x.recordId===id);state.timeSeriesRecords[idx]=record;addTimelineRevision(id,'edit',before,record,$('tlReason').value.trim());}
+ else{state.timeSeriesRecords.unshift(record);addTimelineRevision(record.recordId,'create',null,record,'');}
+ $('timelineDialog').close();await save();renderTimeline();
+ }catch(err){alert(err.message);}
+});
+$('deleteTimeline').onclick=async()=>{const id=editingTimelineId;if(!id)return;const r=state.timeSeriesRecords.find(x=>x.recordId===id);if(!r)return;if(!confirm('この履歴を論理削除しますか？記録自体と修正履歴は保持され、通常の一覧から非表示になります。'))return;const before=structuredClone(r);r.deletedAt=new Date().toISOString();r.updatedAt=r.deletedAt;addTimelineRevision(id,'logical_delete',before,r,'論理削除');$('timelineDialog').close();await save();renderTimeline();};
+$('closeTimeline').onclick=()=>$('timelineDialog').close();
+$('addTimeline').onclick=()=>openTimelineEditor();
+$('timelineFilterType').onchange=renderTimeline;$('timelineSearch').oninput=renderTimeline;
+document.addEventListener('click',e=>{const b=e.target.closest('[data-timeline-open]');if(b)openTimelineEditor(b.dataset.timelineOpen);});
+
 async function boot(){
  $('appVersion').textContent=APP_VERSION;$('footerVersion').textContent='v'+APP_VERSION;
  db=await openDB();state=await dbGet();if(!state){state=structuredClone(EMPTY);await dbPut(state);}else state={...EMPTY,...state};
- validateData(state);let migrated=false;for(const snap of state.balanceSnapshots){if(!snap.snapshotId){snap.snapshotId=newId('snapshot');migrated=true;}}if(!Array.isArray(state.editHistory)){state.editHistory=[];migrated=true;}if(migrated)await dbPut(state);render();
+ validateData(state);let migrated=false;if(!Array.isArray(state.timeSeriesRecords)){state.timeSeriesRecords=[];migrated=true;}if(!Array.isArray(state.timeSeriesRevisions)){state.timeSeriesRevisions=[];migrated=true;}if(state.schemaVersion<3){state.schemaVersion=3;migrated=true;}for(const snap of state.balanceSnapshots){if(!snap.snapshotId){snap.snapshotId=newId('snapshot');migrated=true;}}if(!Array.isArray(state.editHistory)){state.editHistory=[];migrated=true;}if(migrated)await dbPut(state);render();renderTimeline();
  $('connection').textContent=navigator.onLine?'オンライン':'オフライン';window.addEventListener('online',()=>$('connection').textContent='オンライン');window.addEventListener('offline',()=>$('connection').textContent='オフライン');
  $('offlineState').textContent='Service Worker対応';
  if('serviceWorker'in navigator){try{await navigator.serviceWorker.register('./sw.js');}catch(e){$('offlineState').textContent='登録失敗（HTTPS配信を確認）';}}
