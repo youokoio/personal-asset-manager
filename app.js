@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='0.5.0-alpha1';
+const APP_VERSION='0.5.0-alpha2';
 const DB_NAME='pam_local_v2', STORE='state';
 const $=id=>document.getElementById(id);
 const yen=n=>Number.isFinite(Number(n))?Number(n).toLocaleString('ja-JP')+'円':'—';
@@ -10,18 +10,19 @@ let db, state, editing={type:null,id:null};
 
 const EMPTY={schemaVersion:4,dataType:'personal_asset_manager',exportDate:today(),accounts:[],fxPositions:[],fxTransactions:[],fxSwapRecords:[],holdings:[],balanceSnapshots:[],contributionRecords:[],cashTransactions:[],fees:[],editHistory:[],timeSeriesRecords:[],timeSeriesRevisions:[],importMetadata:{},excelHistoricalDatabase:{},excelSimulationDatabase:{},simulationMetadata:{}};
 function openDB(){return new Promise((resolve,reject)=>{const r=indexedDB.open(DB_NAME,1);r.onupgradeneeded=()=>r.result.createObjectStore(STORE);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
-function dbGet(){return new Promise((resolve,reject)=>{const r=db.transaction(STORE).objectStore(STORE).get('state');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
-function dbPut(value){return new Promise((resolve,reject)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(value,'state');tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});}
+function dbGet(key='state'){return new Promise((resolve,reject)=>{const r=db.transaction(STORE).objectStore(STORE).get(key);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
+function dbPut(value,key='state'){return new Promise((resolve,reject)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(value,key);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});}
 function validateData(d){
  if(!d||typeof d!=='object'||Array.isArray(d))throw Error('JSONの最上位はオブジェクトである必要があります。');
  for(const k of ['accounts','fxPositions','holdings','balanceSnapshots'])if(!Array.isArray(d[k]))throw Error(`${k} が配列ではありません。`);
  const ids=new Set(); for(const a of d.accounts){if(!a||typeof a.accountId!=='string'||!a.accountId)throw Error('口座IDが不正です。');if(ids.has(a.accountId))throw Error('口座IDが重複しています: '+a.accountId);ids.add(a.accountId);}
  const pids=new Set();for(const p of d.fxPositions){if(!p||typeof p.positionId!=='string'||!p.positionId)throw Error('建玉IDが不正です。');if(pids.has(p.positionId))throw Error('建玉IDが重複しています: '+p.positionId);pids.add(p.positionId);if(!Number.isFinite(Number(p.remainingQuantity)))throw Error('建玉残数量が数値ではありません: '+p.positionId);}
+ for(const k of ['timeSeriesRecords','timeSeriesRevisions','cashTransactions','fees','editHistory'])if(d[k]!==undefined&&d[k]!==null&&!Array.isArray(d[k]))throw Error(`${k} が配列ではありません。`);
  return true;
 }
 async function save(){state.exportDate=today();state.schemaVersion=4;await dbPut(state);$('lastSaved').textContent='保存 '+new Date().toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});render();}
-function logEdit(type,id,action,before,after){state.editHistory=Array.isArray(state.editHistory)?state.editHistory:[];state.editHistory.unshift({historyId:newId('history'),timestamp:new Date().toISOString(),recordType:type,recordId:id,action,before:before?structuredClone(before):null,after:after?structuredClone(after):null});if(state.editHistory.length>2000)state.editHistory.length=2000;}
-const typeLabel={account:'口座',position:'FX建玉',snapshot:'残高記録',holding:'保有資産',cashTransaction:'入出金・振替'};
+function logEdit(type,id,action,before,after){state.editHistory=Array.isArray(state.editHistory)?state.editHistory:[];state.editHistory.unshift({historyId:newId('history'),timestamp:new Date().toISOString(),recordType:type,recordId:id,action,before:before?structuredClone(before):null,after:after?structuredClone(after):null});if(state.editHistory.length>PAMCore.EDIT_HISTORY_LIMIT)state.editHistory.length=PAMCore.EDIT_HISTORY_LIMIT;}
+const typeLabel={account:'口座',position:'FX建玉',snapshot:'残高記録',holding:'保有資産',cashTransaction:'入出金・振替',bulkHistory:'履歴一括入力'};
 function recordArray(type){return type==='account'?'accounts':type==='position'?'fxPositions':type==='snapshot'?'balanceSnapshots':'holdings';}
 function recordKey(type){return type==='account'?'accountId':type==='position'?'positionId':type==='snapshot'?'snapshotId':'holdingId';}
 function findRecord(type,id){return state[recordArray(type)].find(x=>String(x[recordKey(type)])===String(id));}
@@ -38,7 +39,7 @@ function render(){
  $('holdingList').innerHTML=state.holdings.map(h=>`<div class="item"><div class="item-title">${esc(h.productName||'名称未設定')}</div><div class="item-sub">${esc(accountName(h.accountId))} ・ 評価額 ${yen(h.currentEvaluationAmount)}<br>取得額 ${yen(h.acquisitionAmount)} ／ 評価損益 ${yen(h.evaluationProfitLoss)} ・ 確認日 ${esc(h.confirmationDate||'未設定')}</div><div class="item-actions"><button data-edit="holding" data-id="${esc(h.holdingId)}">編集</button></div></div>`).join('')||'<p class="muted">保有資産がありません</p>';
  renderCash();
  $('historyCount').textContent=`${(state.editHistory||[]).length}件`;
- $('historyList').innerHTML=(state.editHistory||[]).map(h=>{const date=new Date(h.timestamp).toLocaleString('ja-JP');const payload=h.after||h.before||{};const title=payload.transactionType?(cashTypeLabels[payload.transactionType]||payload.transactionType):(payload.accountName||payload.currencyPair||payload.productName||(payload.accountId?accountName(payload.accountId):h.recordId));const detail=h.action==='delete'?'削除':h.action==='create'?'新規保存':h.action==='import'?'データ取り込み':'編集・訂正';return `<div class="item"><div class="item-title">${esc(typeLabel[h.recordType]||h.recordType)}：${esc(title)}</div><div class="item-sub">${esc(date)} ・ ${esc(detail)}<br>${h.before?'変更前の内容あり':'変更前データなし'} ／ ${h.after?'保存後の内容あり':'保存後データなし'}</div><div class="item-actions"><button data-history-view="${esc(h.historyId)}" data-history-side="after" ${h.after?'':'disabled'}>保存後を編集</button>${h.before?`<button data-history-view="${esc(h.historyId)}" data-history-side="before">変更前を編集</button>`:''}</div></div>`;}).join('')||'<p class="muted">まだ保存・訂正履歴はありません。今後の追加・編集・削除から記録されます。</p>';
+ $('historyList').innerHTML=(state.editHistory||[]).map(h=>{const date=new Date(h.timestamp).toLocaleString('ja-JP');const payload=h.after||h.before||{};const title=isBulkPayload(h)?bulkTitle(h):payload.transactionType?(cashTypeLabels[payload.transactionType]||payload.transactionType):(payload.accountName||payload.currencyPair||payload.productName||(payload.accountId?accountName(payload.accountId):h.recordId));const isBulk=h.recordType==='bulkHistory';const detail=h.action==='bulk'?'一括登録・編集':h.action==='delete'?'削除':h.action==='create'?'新規保存':h.action==='import'?'データ取り込み':'編集・訂正';return `<div class="item"><div class="item-title">${esc(typeLabel[h.recordType]||h.recordType)}：${esc(title)}</div><div class="item-sub">${esc(date)} ・ ${esc(detail)}<br>${isBulk?bulkSummary(h):`${h.before?'変更前の内容あり':'変更前データなし'} ／ ${h.after?'保存後の内容あり':'保存後データなし'}`}</div>${isBulk?'':`<div class="item-actions"><button data-history-view="${esc(h.historyId)}" data-history-side="after" ${h.after?'':'disabled'}>保存後を編集</button>${h.before?`<button data-history-view="${esc(h.historyId)}" data-history-side="before">変更前を編集</button>`:''}</div>`}</div>`;}).join('')||'<p class="muted">まだ保存・訂正履歴はありません。今後の追加・編集・削除から記録されます。</p>';
  $('storageStatus').textContent=`IndexedDBに保存。口座 ${state.accounts.length}件、建玉 ${state.fxPositions.length}件、残高記録 ${state.balanceSnapshots.length}件。`;
 }
 const fields={
@@ -110,16 +111,16 @@ $('editorForm').addEventListener('submit',async e=>{e.preventDefault();const {ty
 });
 $('deleteRecord').onclick=async()=>{const {type,id}=editing;if(id===null)return;const arr=recordArray(type);if(!confirm('このデータを削除しますか？'))return;const old=findRecord(type,id);if(old){logEdit(type,id,'delete',old,null);state[arr]=state[arr].filter(x=>String(x[recordKey(type)])!==String(id));} $('editorDialog').close();await save();};
 $('closeDialog').onclick=()=>$('editorDialog').close();
-document.addEventListener('click',e=>{const hb=e.target.closest('[data-history-view]');if(hb){const h=(state.editHistory||[]).find(x=>x.historyId===hb.dataset.historyView);if(!h)return;const candidate=hb.dataset.historySide==='before'?h.before:h.after;if(!candidate){alert('選択した履歴内容がありません。');return;}if(h.recordType==='cashTransaction'){const current=(state.cashTransactions||[]).find(x=>x.transactionId===h.recordId);const seed=structuredClone(candidate);if(current)seed.transactionId=current.transactionId;openCashEditor(current?current.transactionId:null,seed);return;}const current=findRecord(h.recordType,h.recordId);const seed=structuredClone(candidate);if(current)seed[recordKey(h.recordType)]=current[recordKey(h.recordType)];openEditor(h.recordType,current?current[recordKey(h.recordType)]:null,seed);return;}const b=e.target.closest('[data-edit]');if(b)openEditor(b.dataset.edit,b.dataset.id);});
+document.addEventListener('click',e=>{const hb=e.target.closest('[data-history-view]');if(hb){const h=(state.editHistory||[]).find(x=>x.historyId===hb.dataset.historyView);if(!h||h.recordType==='bulkHistory')return;const candidate=hb.dataset.historySide==='before'?h.before:h.after;if(!candidate){alert('選択した履歴内容がありません。');return;}if(h.recordType==='cashTransaction'){const current=(state.cashTransactions||[]).find(x=>x.transactionId===h.recordId);const seed=structuredClone(candidate);if(current)seed.transactionId=current.transactionId;openCashEditor(current?current.transactionId:null,seed);return;}const current=findRecord(h.recordType,h.recordId);const seed=structuredClone(candidate);if(current)seed[recordKey(h.recordType)]=current[recordKey(h.recordType)];openEditor(h.recordType,current?current[recordKey(h.recordType)]:null,seed);return;}const b=e.target.closest('[data-edit]');if(b)openEditor(b.dataset.edit,b.dataset.id);});
 $('addPosition').onclick=()=>openEditor('position');$('addAccount').onclick=()=>openEditor('account');$('addSnapshot').onclick=()=>openEditor('snapshot');$('addHolding').onclick=()=>openEditor('holding');
-document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b));document.querySelectorAll('.view').forEach(x=>x.classList.toggle('hidden',x.id!==b.dataset.tab));if(b.dataset.tab==='timeline')renderTimeline();if(b.dataset.tab==='cash')renderCash();});
+document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b));document.querySelectorAll('.view').forEach(x=>x.classList.toggle('hidden',x.id!==b.dataset.tab));if(b.dataset.tab==='timeline')renderTimeline();if(b.dataset.tab==='cash')renderCash();if(b.dataset.tab==='bulk')bulkEnter();});
 function download(name,blob){const a=document.createElement('a');const u=URL.createObjectURL(blob);a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1500);}
 $('exportJson').onclick=()=>download('personal_asset_backup_'+today()+'.json',new Blob([JSON.stringify({...state,exportDate:today()},null,2)],{type:'application/json'}));
 async function deriveKey(password,salt){const material=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveKey']);return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:310000,hash:'SHA-256'},material,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);}
-$('exportEncrypted').onclick=async()=>{try{const pw=$('backupPassword').value;if(pw.length<12)throw Error('パスワードは12文字以上にしてください。');const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12)),key=await deriveKey(pw,salt);const data=new TextEncoder().encode(JSON.stringify({...state,exportDate:today()}));const cipher=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,data);const payload={format:'PAM-ENCRYPTED-BACKUP',version:1,kdf:'PBKDF2-SHA256',iterations:310000,cipher:'AES-256-GCM',salt:btoa(String.fromCharCode(...salt)),iv:btoa(String.fromCharCode(...iv)),data:btoa(String.fromCharCode(...new Uint8Array(cipher)))};download('personal_asset_encrypted_'+today()+'.pamenc',new Blob([JSON.stringify(payload)],{type:'application/octet-stream'}));}catch(e){alert(e.message);}};
-$('importBtn').onclick=async()=>{const f=$('importFile').files[0];if(!f){$('importResult').textContent='JSONファイルを選択してください。';return;}try{const d=JSON.parse(await f.text());validateData(d);if(!confirm(`検証成功：口座${d.accounts.length}件、FX建玉${d.fxPositions.length}件、保有資産${d.holdings.length}件。現在のデータを置き換えます。事前にバックアップしましたか？`))return;const previousHistory=state.editHistory||[];state={...EMPTY,...d,editHistory:Array.isArray(d.editHistory)?d.editHistory:previousHistory};migrateStateData();await save();$('importResult').textContent='取り込みました。';}catch(e){$('importResult').textContent='取り込み中止：'+e.message;}};
-$('importEncrypted').onclick=async()=>{const f=$('encryptedFile').files[0],pw=$('restorePassword').value;if(!f){alert('暗号化バックアップを選択してください。');return;}try{const p=JSON.parse(await f.text());if(p.format!=='PAM-ENCRYPTED-BACKUP')throw Error('対応していないファイル形式です。');const from=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));const key=await deriveKey(pw,from(p.salt));const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:from(p.iv)},key,from(p.data));const d=JSON.parse(new TextDecoder().decode(plain));validateData(d);if(!confirm('暗号化バックアップを復元し、現在のデータを置き換えますか？'))return;const previousHistory=state.editHistory||[];state={...EMPTY,...d,editHistory:Array.isArray(d.editHistory)?d.editHistory:previousHistory};migrateStateData();await save();alert('復元しました。');}catch(e){alert('復元できません：パスワードまたはファイルを確認してください。');}};
-$('resetBtn').onclick=async()=>{if(!confirm('端末内のすべての資産データを削除します。よろしいですか？'))return;state=structuredClone(EMPTY);await save();};
+$('exportEncrypted').onclick=async()=>{try{const pw=$('backupPassword').value;if(pw.length<12)throw Error('パスワードは12文字以上にしてください。');const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12)),key=await deriveKey(pw,salt);const data=new TextEncoder().encode(JSON.stringify({...state,exportDate:today()}));const cipher=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,data);const payload={format:'PAM-ENCRYPTED-BACKUP',version:1,kdf:'PBKDF2-SHA256',iterations:310000,cipher:'AES-256-GCM',salt:PAMCore.bytesToBase64(salt),iv:PAMCore.bytesToBase64(iv),data:PAMCore.bytesToBase64(new Uint8Array(cipher))};download('personal_asset_encrypted_'+today()+'.pamenc',new Blob([JSON.stringify(payload)],{type:'application/octet-stream'}));}catch(e){alert(e.message);}};
+$('importBtn').onclick=async()=>{const f=$('importFile').files[0];if(!f){$('importResult').textContent='JSONファイルを選択してください。';return;}try{const d=JSON.parse(await f.text());validateData(d);if(!confirm(`検証成功：口座${d.accounts.length}件、FX建玉${d.fxPositions.length}件、保有資産${d.holdings.length}件。現在のデータを置き換えます。事前にバックアップしましたか？`))return;const previousHistory=state.editHistory||[];await keepPreImportCopy();state={...EMPTY,...d,editHistory:Array.isArray(d.editHistory)?d.editHistory:previousHistory};migrateStateData();await save();$('importResult').textContent='取り込みました。（取り込み前の状態は端末内に控えとして保持しています）';}catch(e){$('importResult').textContent='取り込み中止：'+e.message;}};
+$('importEncrypted').onclick=async()=>{const f=$('encryptedFile').files[0],pw=$('restorePassword').value;if(!f){alert('暗号化バックアップを選択してください。');return;}try{const p=JSON.parse(await f.text());if(p.format!=='PAM-ENCRYPTED-BACKUP')throw Error('対応していないファイル形式です。');const from=PAMCore.base64ToBytes;const key=await deriveKey(pw,from(p.salt));const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:from(p.iv)},key,from(p.data));const d=JSON.parse(new TextDecoder().decode(plain));validateData(d);if(!confirm('暗号化バックアップを復元し、現在のデータを置き換えますか？'))return;const previousHistory=state.editHistory||[];await keepPreImportCopy();state={...EMPTY,...d,editHistory:Array.isArray(d.editHistory)?d.editHistory:previousHistory};migrateStateData();await save();alert('復元しました。（復元前の状態は端末内に控えとして保持しています）');}catch(e){alert('復元できません：パスワードまたはファイルを確認してください。');}};
+$('resetBtn').onclick=async()=>{if(!confirm('端末内のすべての資産データを削除します。よろしいですか？'))return;await keepPreImportCopy();state=structuredClone(EMPTY);await save();};
 $('manualUpdate').onclick=async()=>{if(!('serviceWorker'in navigator)){$('updateStatus').textContent='Service Worker非対応です。';return;}try{const reg=await navigator.serviceWorker.getRegistration();if(!reg){$('updateStatus').textContent='Service Workerが未登録です。';return;}await reg.update();$('updateStatus').textContent='更新確認を実行しました。新しい版があれば、現在の画面を閉じて再度開くと反映されます。';}catch(e){$('updateStatus').textContent='更新確認に失敗しました。ネットワーク接続を確認してください。';}};
 
 // Cash movement and fee ledger (v0.5)
@@ -192,7 +193,7 @@ $('addCashTransaction').onclick=()=>openCashEditor();$('closeCash').onclick=()=>
 document.addEventListener('click',e=>{const b=e.target.closest('[data-cash-edit]');if(b)openCashEditor(b.dataset.cashEdit);});
 $('cashForm').addEventListener('submit',async e=>{
  e.preventDefault();try{
-  const type=$('cashType').value,amount=Number($('cashAmount').value||0),fee=Number($('cashFee').value||0),now=new Date().toISOString();
+  const type=$('cashType').value,transfer=type==='transfer',deposit=type==='deposit',withdrawal=type==='withdrawal',amount=Number($('cashAmount').value||0),fee=Number($('cashFee').value||0),now=new Date().toISOString();
   if(fee<0||amount<0)throw Error('金額・手数料は0以上で入力してください。');
   const source=$('cashSource').value||null,target=$('cashTarget').value||null,feeAccount=$('cashFeeAccount').value||$('cashAccount').value||source||target;
   if(type==='transfer'&&(!source||!target||source===target))throw Error('振替元と振替先に異なる口座を指定してください。');
@@ -208,7 +209,7 @@ $('cashForm').addEventListener('submit',async e=>{
 });
 $('deleteCash').onclick=async()=>{if(!editingCashId)return;const old=state.cashTransactions.find(x=>x.transactionId===editingCashId);if(!old)return;if(!confirm('この入出金・振替記録と関連手数料を削除しますか？変更履歴は保持します。'))return;logEdit('cashTransaction',old.transactionId,'delete',old,null);state.cashTransactions=state.cashTransactions.filter(x=>x.transactionId!==editingCashId);state.fees=(state.fees||[]).filter(x=>x.transactionId!==editingCashId);$('cashDialog').close();await save();};
 
-const timelineTypeLabels={account_snapshot:'口座スナップショット',bank_balance:'銀行残高',fx_position:'FX建玉更新',fx_swap:'FXスワップ',fx_settlement:'FX決済',securities_snapshot:'証券評価額',contribution:'入出金・積立',mortgage:'住宅ローン',other:'その他'};
+const timelineTypeLabels={crypto_snapshot:'暗号資産評価',account_snapshot:'口座スナップショット',bank_balance:'銀行残高',fx_position:'FX建玉更新',fx_swap:'FXスワップ',fx_settlement:'FX決済',securities_snapshot:'証券評価額',contribution:'入出金・積立',mortgage:'住宅ローン',other:'その他'};
 let editingTimelineId=null;
 const localDateTimeValue=iso=>{if(!iso)return '';const d=new Date(iso);if(Number.isNaN(d.getTime()))return '';const pad=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;};
 const fromLocalDateTime=value=>{const d=new Date(value);if(Number.isNaN(d.getTime()))throw Error('有効日時を正しく入力してください。');return d.toISOString();};
@@ -218,7 +219,7 @@ function timelineTitle(r){return `${timelineTypeLabels[r.recordType]||r.recordTy
 function renderTimeline(){
  const type=$('timelineFilterType')?.value||'',q=($('timelineSearch')?.value||'').trim().toLocaleLowerCase('ja');
  const rows=(state.timeSeriesRecords||[]).filter(r=>!r.deletedAt&&(!type||r.recordType===type)&&(!q||[timelineTitle(r),r.memo,r.entityId,r.recordId].join(' ').toLocaleLowerCase('ja').includes(q))).sort((a,b)=>String(b.effectiveAt).localeCompare(String(a.effectiveAt))||String(b.registeredAt).localeCompare(String(a.registeredAt)));
- $('timelineList').innerHTML=rows.map(r=>{const v=r.values||{};const effective=new Date(r.effectiveAt).toLocaleString('ja-JP');const registered=new Date(r.registeredAt).toLocaleString('ja-JP');const amount=v.amount===null||v.amount===undefined?'':`金額 ${yen(v.amount)}`;const qv=v.quantity===null||v.quantity===undefined?'':`数量 ${num(v.quantity)}`;const rate=v.rate===null||v.rate===undefined?'':`レート ${num(v.rate)}`;const pl=v.profitLoss===null||v.profitLoss===undefined?'':`損益 ${yen(v.profitLoss)}`;const sw=v.swap===null||v.swap===undefined?'':`スワップ ${yen(v.swap)}`;return `<div class="item"><div class="item-title">${esc(timelineTitle(r))}</div><div class="item-sub">有効日時：${esc(effective)}<br>${[amount,qv,rate,pl,sw].filter(Boolean).join(' ／ ')||'数値項目なし'}<br>登録：${esc(registered)} ・ ${esc({actual:'実績',manual_historical:'手入力過去実績',estimate:'推定',calculated:'計算',simulation:'シミュレーション'}[r.valueKind]||r.valueKind)} ・ ${esc(r.source||'手入力')}${r.memo?'<br>メモ：'+esc(r.memo):''}</div><div class="item-actions"><button data-timeline-open="${esc(r.recordId)}">詳細・修正</button></div></div>`;}).join('')||'<p class="muted">該当する時系列記録はありません。履歴を追加するか、検索条件を変更してください。</p>';
+ $('timelineList').innerHTML=rows.map(r=>{const v=r.values||{};const effective=r.datePrecision==='date'?PAMCore.tsDate(r)+'（日付のみ）':new Date(r.effectiveAt).toLocaleString('ja-JP');const registered=new Date(r.registeredAt).toLocaleString('ja-JP');const valueText=formatTsValues(v);return `<div class="item"><div class="item-title">${esc(timelineTitle(r))}</div><div class="item-sub">有効日時：${esc(effective)}<br>${esc(valueText)||'数値項目なし'}<br>登録：${esc(registered)} ・ ${esc({actual:'実績',manual_historical:'手入力過去実績',estimate:'推定',calculated:'計算',simulation:'シミュレーション'}[r.valueKind]||r.valueKind)} ・ ${esc({manual:'手入力',import:'インポート',estimate:'推定計算',system:'システム',bulk:'一括入力'}[r.source]||r.source||'手入力')}${r.derivedFields?.length?'<br>自動計算：'+esc(r.derivedFields.map(k=>PAMCore.VALUE_LABELS[k]?.label||k).join('・')):''}${r.memo?'<br>メモ：'+esc(r.memo):''}</div><div class="item-actions"><button data-timeline-open="${esc(r.recordId)}">詳細・修正</button></div></div>`;}).join('')||'<p class="muted">該当する時系列記録はありません。履歴を追加するか、検索条件を変更してください。</p>';
 }
 function openTimelineEditor(id=null){
  editingTimelineId=id;const r=id?(state.timeSeriesRecords||[]).find(x=>x.recordId===id):null;
@@ -228,9 +229,9 @@ function openTimelineEditor(id=null){
  const v=r?.values||{};$('tlAmount').value=v.amount??'';$('tlQuantity').value=v.quantity??'';$('tlRate').value=v.rate??'';$('tlProfitLoss').value=v.profitLoss??'';$('tlSwap').value=v.swap??'';
  $('tlValueKind').value=r?.valueKind||'actual';$('tlSource').value=r?.source||'manual';$('tlMemo').value=r?.memo||'';$('tlReason').value='';
  const revisions=(state.timeSeriesRevisions||[]).filter(x=>x.recordId===id).length;
- $('timelineAudit').textContent=r?`記録ID：${r.recordId} ／ 登録日時：${new Date(r.registeredAt).toLocaleString('ja-JP')} ／ 最終修正：${new Date(r.updatedAt||r.registeredAt).toLocaleString('ja-JP')} ／ 修正履歴：${revisions}件`:'新規記録です。登録日時は保存時に自動記録されます。';
+ $('timelineAudit').textContent=r?`記録ID：${r.recordId} ／ 登録日時：${new Date(r.registeredAt).toLocaleString('ja-JP')} ／ 最終修正：${new Date(r.updatedAt||r.registeredAt).toLocaleString('ja-JP')} ／ 修正履歴：${revisions}件${r.batchId?' ／ 一括ID：'+r.batchId:''}${r.datePrecision==='date'?' ／ 日付のみの記録':''}`:'新規記録です。登録日時は保存時に自動記録されます。';
  const revs=(state.timeSeriesRevisions||[]).filter(x=>x.recordId===id).slice(0,10);
- $('timelineRevisionList').innerHTML=revs.length?'<h3 class="subheading">この記録の変更履歴</h3>'+revs.map(x=>{const old=x.before||{},next=x.after||{};const val=z=>{const w=z.values||{};return [w.amount!=null?'金額 '+yen(w.amount):'',w.quantity!=null?'数量 '+num(w.quantity):'',w.rate!=null?'レート '+num(w.rate):'',w.profitLoss!=null?'損益 '+yen(w.profitLoss):'',w.swap!=null?'スワップ '+yen(w.swap):''].filter(Boolean).join(' ／ ')||'数値項目なし';};return `<div class="item"><div class="item-title">${esc({create:'新規登録',edit:'修正',logical_delete:'論理削除'}[x.action]||x.action)} ・ ${esc(new Date(x.changedAt).toLocaleString('ja-JP'))}</div><div class="item-sub">変更前：${esc(x.before?val(old):'—')}<br>変更後：${esc(x.after?val(next):'—')}${x.reason?'<br>理由：'+esc(x.reason):''}</div></div>`;}).join(''):'<p class="muted">この記録の変更履歴はまだありません。</p>';
+ $('timelineRevisionList').innerHTML=revs.length?'<h3 class="subheading">この記録の変更履歴</h3>'+revs.map(x=>{const old=x.before||{},next=x.after||{};const val=z=>formatTsValues(z.values)||'数値項目なし';return `<div class="item"><div class="item-title">${esc({create:'新規登録',edit:'修正',logical_delete:'論理削除'}[x.action]||x.action)} ・ ${esc(new Date(x.changedAt).toLocaleString('ja-JP'))}${x.batchId?' ・ 一括操作':''}</div><div class="item-sub">変更前：${esc(x.before?val(old):'—')}<br>変更後：${esc(x.after?val(next):'—')}${x.reason?'<br>理由：'+esc(x.reason):''}</div></div>`;}).join(''):'<p class="muted">この記録の変更履歴はまだありません。</p>';
  $('deleteTimeline').classList.toggle('hidden',!r||!!r.deletedAt);$('timelineDialog').showModal();
 }
 function addTimelineRevision(recordId,action,before,after,reason=''){
@@ -241,7 +242,8 @@ $('timelineForm').addEventListener('submit',async e=>{
  e.preventDefault();try{
  const now=new Date().toISOString(),id=editingTimelineId;
  const before=id?(state.timeSeriesRecords||[]).find(x=>x.recordId===id):null;
- const record={recordId:id||newId('ts'),recordType:$('tlType').value,accountId:$('tlAccount').value||null,entityId:$('tlEntity').value.trim()||null,effectiveAt:fromLocalDateTime($('tlEffectiveAt').value),registeredAt:before?.registeredAt||now,updatedAt:now,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'Asia/Tokyo',valueKind:$('tlValueKind').value,source:$('tlSource').value,values:{amount:timelineNum($('tlAmount').value),quantity:timelineNum($('tlQuantity').value),rate:timelineNum($('tlRate').value),profitLoss:timelineNum($('tlProfitLoss').value),swap:timelineNum($('tlSwap').value)},memo:$('tlMemo').value.trim(),deletedAt:null};
+ const effAt=fromLocalDateTime($('tlEffectiveAt').value),unchangedTime=!!before&&localDateTimeValue(before.effectiveAt)===$('tlEffectiveAt').value;
+ const record={...(before||{}),recordId:id||newId('ts'),recordType:$('tlType').value,accountId:$('tlAccount').value||null,entityId:$('tlEntity').value.trim()||null,effectiveAt:unchangedTime?before.effectiveAt:effAt,effectiveDate:unchangedTime?PAMCore.tsDate(before):PAMCore.localDateString(new Date(effAt)),datePrecision:unchangedTime?(before.datePrecision||'datetime'):'datetime',registeredAt:before?.registeredAt||now,updatedAt:now,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'Asia/Tokyo',valueKind:$('tlValueKind').value,source:$('tlSource').value,values:{...(before?.values||{}),amount:timelineNum($('tlAmount').value),quantity:timelineNum($('tlQuantity').value),rate:timelineNum($('tlRate').value),profitLoss:timelineNum($('tlProfitLoss').value),swap:timelineNum($('tlSwap').value)},memo:$('tlMemo').value.trim(),deletedAt:null};
  if(before){const idx=state.timeSeriesRecords.findIndex(x=>x.recordId===id);state.timeSeriesRecords[idx]=record;addTimelineRevision(id,'edit',before,record,$('tlReason').value.trim());}
  else{state.timeSeriesRecords.unshift(record);addTimelineRevision(record.recordId,'create',null,record,'');}
  $('timelineDialog').close();await save();renderTimeline();
@@ -253,10 +255,128 @@ $('addTimeline').onclick=()=>openTimelineEditor();
 $('timelineFilterType').onchange=renderTimeline;$('timelineSearch').oninput=renderTimeline;
 document.addEventListener('click',e=>{const b=e.target.closest('[data-timeline-open]');if(b)openTimelineEditor(b.dataset.timelineOpen);});
 
+// ===== 履歴一括入力（v0.5.0-alpha2）：画面ロジック。計算・検証は history-core.js =====
+const BULK_DRAFT_KEY='bulk_draft';
+const kindLabels={actual:'実績・確定値',manual_historical:'手入力の過去実績',estimate:'推定値',calculated:'計算値',simulation:'シミュレーション'};
+let bulk={templateId:'bank',accountId:'',rows:[],plan:null},bulkTimer=null;
+const numFull=n=>Number.isFinite(Number(n))?Number(n).toLocaleString('ja-JP',{maximumFractionDigits:8}):'—';
+function fmtTsValue(key,x){return PAMCore.VALUE_LABELS[key]?.fmt==='yen'?yen(x):numFull(x);}
+function formatTsValues(v){v=v||{};return Object.keys(PAMCore.VALUE_LABELS).filter(k=>v[k]!==null&&v[k]!==undefined&&v[k]!=='').map(k=>`${PAMCore.VALUE_LABELS[k].label} ${fmtTsValue(k,v[k])}`).join(' ／ ');}
+function isBulkPayload(h){return h&&h.recordType==='bulkHistory';}
+function bulkTitle(h){const a=h.after||{};return `${accountName(a.accountId)}（${PAMCore.TEMPLATES[a.templateId]?.label||'—'}）`;}
+function bulkSummary(h){const a=h.after||{},c=a.counts||{};return `新規${c.create||0}件／修正${c.edit||0}件／削除${c.delete||0}件・一括ID ${esc(a.batchId||'')}${a.reason?'<br>理由：'+esc(a.reason):''}`;}
+async function keepPreImportCopy(){try{await dbPut({savedAt:new Date().toISOString(),appVersion:APP_VERSION,state:structuredClone(state)},'pre_import_backup');}catch(e){throw Error('取り込み前の控えを保存できなかったため、処理を中止しました。');}}
+$('exportPreImport').onclick=async()=>{try{const b=await dbGet('pre_import_backup');if(!b||!b.state){alert('取り込み前の控えはまだありません。');return;}download('personal_asset_before_import_'+today()+'.json',new Blob([JSON.stringify({...b.state,exportDate:today()},null,2)],{type:'application/json'}));}catch(e){alert('控えを読み出せませんでした。');}};
+
+const bulkTpl=()=>PAMCore.TEMPLATES[bulk.templateId];
+const bulkUid=()=>'r'+Math.random().toString(36).slice(2,9);
+const bulkBlankRow=date=>({uid:bulkUid(),recordId:null,base:null,date:date||today(),entityId:'',values:{},memo:'',valueKind:$('bulkKind').value,delete:false});
+function bulkRowFromRecord(r){const tpl=bulkTpl(),values={};for(const fd of tpl.fields){const x=r.values?.[fd.key];values[fd.key]=x===null||x===undefined?'':String(x);}const other={};for(const [k,v] of Object.entries(r.values||{}))if(!tpl.fields.some(fd=>fd.key===k))other[k]=v;return {uid:bulkUid(),recordId:r.recordId,base:r.updatedAt||null,date:PAMCore.tsDate(r),entityId:r.entityId||'',values,memo:r.memo||'',valueKind:r.valueKind||'manual_historical',delete:false,extra:formatTsValues(other)};}
+const derivedLabels=(tid,keys)=>keys.map(k=>PAMCore.TEMPLATES[tid]?.fields.find(f=>f.key===k)?.label||PAMCore.VALUE_LABELS[k]?.label||k).join('・');
+function bulkAccountOptions(){const el=$('bulkAccount');el.innerHTML='';for(const a of state.accounts){const o=document.createElement('option');o.value=a.accountId;o.textContent=`${a.accountName||a.accountId}（${a.accountType||'口座'}）`;el.append(o);}if(!state.accounts.some(a=>a.accountId===bulk.accountId))bulk.accountId=state.accounts[0]?.accountId||'';el.value=bulk.accountId;}
+function bulkTemplateOptions(){const el=$('bulkTemplate');el.innerHTML='';for(const t of Object.values(PAMCore.TEMPLATES)){const o=document.createElement('option');o.value=t.id;o.textContent=t.label;el.append(o);}el.value=bulk.templateId;}
+function bulkUpdateMsg(extra=''){const n=bulk.rows.length,e=bulk.rows.filter(r=>r.recordId).length,d=bulk.rows.filter(r=>r.delete).length;$('bulkMsg').textContent=n?`${n}行（既存${e}／新規${n-e}／削除予定${d}）${extra}`:(extra||'');}
+function bulkDraftSchedule(){bulkUpdateMsg();clearTimeout(bulkTimer);bulkTimer=setTimeout(bulkSaveDraftNow,600);$('bulkDraftState').textContent='入力中（未保存）';}
+async function bulkSaveDraftNow(){try{if(!bulk.rows.length){await dbPut(null,BULK_DRAFT_KEY);$('bulkDraftState').textContent='';return;}await dbPut({savedAt:new Date().toISOString(),accountId:bulk.accountId,templateId:bulk.templateId,rows:bulk.rows,kind:$('bulkKind').value,reason:$('bulkReason').value},BULK_DRAFT_KEY);$('bulkDraftState').textContent='下書きを端末内に自動保存済み';}catch(e){$('bulkDraftState').textContent='下書きを自動保存できません';}}
+function bulkMk(tag,props={},text){const el=document.createElement(tag);Object.assign(el,props);if(text!==undefined)el.textContent=text;return el;}
+function bulkField(label,ctl,wide){const w=bulkMk('div',{className:'field'+(wide?' full-width':'')});w.append(bulkMk('label',{},label),ctl);return w;}
+function bulkActBtn(text,act,cls=''){const b=bulkMk('button',{type:'button',className:cls},text);b.dataset.bulkAct=act;return b;}
+function bulkRenderRows(){
+ const root=$('bulkRows');root.innerHTML='';const tpl=bulkTpl();
+ if(!bulk.rows.length){root.append(bulkMk('p',{className:'panel muted'},'行がありません。「＋ 行を追加」で新規入力するか、「既存の履歴を読み込む」で修正対象を読み込みます。'));bulkUpdateMsg();return;}
+ bulk.rows.forEach((row,i)=>{
+  const card=bulkMk('div',{className:'panel bulk-row'+(row.delete?' marked-delete':'')});card.dataset.uid=row.uid;
+  const head=bulkMk('div',{className:'bulk-row-head'});head.append(bulkMk('strong',{},`${i+1}行目`),bulkMk('span',{className:'badge'},row.recordId?'既存':'新規'),bulkMk('span',{className:'spacer'}),bulkActBtn('複製','dup'),bulkActBtn(row.recordId?(row.delete?'削除を取消':'削除'):'行を消す','del','danger'));card.append(head);
+  const grid=bulkMk('div',{className:'form-grid'});
+  const date=bulkMk('input',{type:'date',value:row.date,disabled:row.delete});date.dataset.f='date';grid.append(bulkField('対象日（実際の日付）',date,true));
+  if(tpl.entity){const sel=bulkMk('select',{disabled:row.delete});sel.dataset.f='entityId';sel.append(bulkMk('option',{value:''},'選択'));for(const x of tpl.entity.options)sel.append(bulkMk('option',{value:x},x));sel.value=row.entityId||'';grid.append(bulkField(tpl.entity.label,sel));}
+  for(const fd of tpl.fields){
+   const inp=bulkMk('input',{type:'text',autocomplete:'off',value:row.values[fd.key]??'',disabled:row.delete});inp.setAttribute('inputmode','decimal');inp.dataset.f='v:'+fd.key;let ctl=inp;
+   if(fd.signed){const wrap=bulkMk('div',{className:'num-wrap'});const sb=bulkActBtn('±','sign','sign-btn');sb.dataset.key=fd.key;sb.disabled=row.delete;sb.setAttribute('aria-label','正負を切り替え');wrap.append(inp,sb);ctl=wrap;}
+   grid.append(bulkField(fd.label,ctl));
+  }
+  const kind=bulkMk('select',{disabled:row.delete});kind.dataset.f='valueKind';for(const [v,t] of Object.entries(kindLabels))kind.append(bulkMk('option',{value:v},t));kind.value=row.valueKind;grid.append(bulkField('値の区分',kind));
+  const memo=bulkMk('input',{type:'text',maxLength:500,value:row.memo,disabled:row.delete});memo.dataset.f='memo';grid.append(bulkField('メモ・根拠',memo,true));
+  if(row.extra)card.append(bulkMk('p',{className:'muted'},'この記録にはほかの保存値があります（この画面では変更しません）：'+row.extra));
+  card.append(grid);root.append(card);
+ });
+ bulkUpdateMsg();
+}
+function bulkOnInput(e){const t=e.target,f=t.dataset?.f;if(!f)return;const card=t.closest('.bulk-row');const row=card&&bulk.rows.find(r=>r.uid===card.dataset.uid);if(!row)return;
+ if(f==='date')row.date=t.value;else if(f==='entityId')row.entityId=t.value;else if(f==='memo')row.memo=t.value;else if(f==='valueKind')row.valueKind=t.value;else if(f.startsWith('v:'))row.values[f.slice(2)]=t.value;bulkDraftSchedule();}
+$('bulkRows').addEventListener('input',bulkOnInput);$('bulkRows').addEventListener('change',bulkOnInput);
+$('bulkRows').addEventListener('click',e=>{
+ const b=e.target.closest('[data-bulk-act]');if(!b)return;const card=b.closest('.bulk-row');const idx=bulk.rows.findIndex(r=>r.uid===card?.dataset.uid);if(idx<0)return;const row=bulk.rows[idx],act=b.dataset.bulkAct;
+ if(act==='dup'){bulk.rows.splice(idx+1,0,{...structuredClone(row),uid:bulkUid(),recordId:null,base:null,delete:false});bulkRenderRows();bulkDraftSchedule();}
+ else if(act==='del'){if(row.recordId)row.delete=!row.delete;else bulk.rows.splice(idx,1);bulkRenderRows();bulkDraftSchedule();}
+ else if(act==='sign'){const k=b.dataset.key,v=String(row.values[k]??'').trim();row.values[k]=v.startsWith('-')?v.slice(1):(v===''?'-':'-'+v.replace(/^\+/,''));const inp=card.querySelector(`[data-f="v:${k}"]`);if(inp)inp.value=row.values[k];bulkDraftSchedule();}
+});
+function bulkAddRows(n){const last=bulk.rows[bulk.rows.length-1];for(let k=0;k<n;k++)bulk.rows.push(bulkBlankRow(last?.date));bulkRenderRows();bulkDraftSchedule();const cards=$('bulkRows').querySelectorAll('.bulk-row');cards[cards.length-n]?.scrollIntoView({block:'start',behavior:'smooth'});}
+function bulkChangeContext(accountId,templateId){
+ if(bulk.rows.length&&!confirm('入力中の行は破棄されます。よろしいですか？')){$('bulkAccount').value=bulk.accountId;$('bulkTemplate').value=bulk.templateId;return;}
+ bulk.rows=[];bulk.plan=null;bulk.accountId=accountId;bulk.templateId=templateId;$('bulkTemplate').value=templateId;bulkRenderRows();bulkSaveDraftNow();
+}
+$('bulkAccount').onchange=()=>{const a=state.accounts.find(x=>x.accountId===$('bulkAccount').value);bulkChangeContext(a?.accountId||'',PAMCore.templateIdForAccountType(a?.accountType));};
+$('bulkTemplate').onchange=()=>bulkChangeContext(bulk.accountId,$('bulkTemplate').value);
+$('bulkKind').onchange=bulkDraftSchedule;$('bulkReason').oninput=bulkDraftSchedule;
+$('bulkAddRow').onclick=()=>bulkAddRows(1);$('bulkAddFive').onclick=()=>bulkAddRows(5);
+$('bulkDiscard').onclick=()=>{if(bulk.rows.length&&!confirm('入力中の行をすべて破棄します。保存済みの履歴には影響しません。よろしいですか？'))return;bulk.rows=[];bulk.plan=null;bulkRenderRows();bulkSaveDraftNow();$('bulkNotice').classList.add('hidden');};
+$('bulkLoad').onclick=()=>{
+ if(!bulk.accountId){alert('口座を選択してください。');return;}
+ if(bulk.rows.length&&!confirm('入力中の行は破棄され、既存の履歴で置き換わります。よろしいですか？'))return;
+ const from=$('bulkFrom').value,to=$('bulkTo').value,tpl=bulkTpl();
+ let recs=(state.timeSeriesRecords||[]).filter(r=>!r.deletedAt&&r.accountId===bulk.accountId&&r.recordType===tpl.recordType&&(!from||PAMCore.tsDate(r)>=from)&&(!to||PAMCore.tsDate(r)<=to));
+ recs.sort((a,b)=>PAMCore.tsDate(a).localeCompare(PAMCore.tsDate(b))||String(a.effectiveAt).localeCompare(String(b.effectiveAt))||String(a.registeredAt).localeCompare(String(b.registeredAt)));
+ const total=recs.length;recs=recs.slice(0,300);bulk.rows=recs.map(bulkRowFromRecord);bulk.plan=null;bulkRenderRows();bulkDraftSchedule();
+ bulkUpdateMsg(total===0?'（該当する履歴はありません）':total>300?`（該当${total}件のうち先頭300件のみ読み込みました。期間を絞ってください）`:'');
+};
+const chgVal=(c,x)=>x===null||x===undefined||x===''?'—':c.key==='区分'?(kindLabels[x]||x):c.fmt==='yen'?yen(x):c.fmt?numFull(x):String(x);
+function bulkShowPreview(){
+ const now=new Date().toISOString(),tpl=bulkTpl();
+ const plan=PAMCore.planBatch({records:state.timeSeriesRecords||[],accountId:bulk.accountId,templateId:bulk.templateId,rows:bulk.rows.map(r=>({...r,values:{...r.values}})),defaultKind:$('bulkKind').value,reason:$('bulkReason').value.trim(),batchId:newId('batch'),now,newId,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'Asia/Tokyo',today:today()});
+ bulk.plan=plan;const c=plan.counts,rowNo=r=>r>=0?`${r+1}行目`:'全体';
+ let html=`<div class="kv"><span>口座</span><b>${esc(accountName(plan.accountId))}</b></div><div class="kv"><span>入力項目セット</span><b>${esc(tpl.label)}</b></div><div class="kv"><span>登録日時（保存時に記録）</span><b>${esc(new Date(now).toLocaleString('ja-JP'))}</b></div>`;
+ html+=`<div class="stats"><div class="stat"><span>新規</span><strong>${c.create}</strong></div><div class="stat"><span>修正</span><strong>${c.edit}</strong></div><div class="stat"><span>削除</span><strong>${c.delete}</strong></div></div>`;
+ if(c.unchanged)html+=`<p class="muted">変更なし ${c.unchanged}行（保存対象外・修正履歴も作りません）</p>`;
+ if(plan.errors.length)html+=`<div class="notice err"><b>保存できません。戻って次を修正してください。</b><br>${plan.errors.map(x=>`${esc(rowNo(x.row))}：${esc(x.msg)}`).join('<br>')}</div>`;
+ if(plan.warnings.length)html+=`<div class="notice"><b>確認事項（保存は可能です）</b><br>${plan.warnings.map(x=>`${esc(rowNo(x.row))}：${esc(x.msg)}`).join('<br>')}</div>`;
+ $('bulkPlanSummary').innerHTML=html;
+ const act=plan.items.filter(x=>x.action!=='unchanged').sort((a,b)=>a.row-b.row);
+ $('bulkPlanList').innerHTML=act.map(it=>{
+  const lbl={create:'新規',edit:'修正',delete:'論理削除'}[it.action],rec=it.after||it.before,d=PAMCore.tsDate(rec);
+  let sub='';
+  if(it.action==='create')sub=esc(formatTsValues(it.after.values))+(it.derived.length?`<br>自動計算：${esc(derivedLabels(plan.templateId,it.derived))}`:'');
+  else if(it.action==='edit')sub=it.changes.map(ch=>`${esc(ch.key)}：${esc(chgVal(ch,ch.from))} → <b>${esc(chgVal(ch,ch.to))}</b>`).join('<br>')+(it.derived.length?`<br>自動計算：${esc(derivedLabels(plan.templateId,it.derived))}`:'');
+  else sub=esc(formatTsValues(it.before.values))+'<br>記録は残り、通常の一覧から非表示になります。';
+  return `<div class="item pv-${it.action}"><div class="item-title">${esc(rowNo(it.row))} ・ ${lbl} ・ 対象日 ${esc(d)}${rec.entityId?' ・ '+esc(rec.entityId):''}</div><div class="item-sub">${sub}</div></div>`;
+ }).join('')||'<p class="muted">保存対象の変更がありません。</p>';
+ $('bulkCommit').disabled=plan.errors.length>0||(c.create+c.edit+c.delete)===0;
+ $('bulkEdit').classList.add('hidden');$('bulkConfirm').classList.remove('hidden');window.scrollTo(0,0);
+}
+$('bulkPreview').onclick=bulkShowPreview;
+$('bulkBack').onclick=()=>{$('bulkConfirm').classList.add('hidden');$('bulkEdit').classList.remove('hidden');};
+$('bulkCommit').onclick=async()=>{
+ const plan=bulk.plan;if(!plan||plan.errors.length)return;$('bulkCommit').disabled=true;
+ try{
+  const next=structuredClone(state);PAMCore.applyPlan(next,plan,newId);next.exportDate=today();next.schemaVersion=4;
+  await dbPut(next);state=next;   // 1回のput。失敗時はstateも置き換えない
+  const c=plan.counts;bulk.rows=[];bulk.plan=null;await bulkSaveDraftNow();
+  $('lastSaved').textContent='保存 '+new Date().toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});render();renderTimeline();bulkRenderRows();
+  $('bulkConfirm').classList.add('hidden');$('bulkEdit').classList.remove('hidden');$('bulkNotice').textContent=`保存しました：新規${c.create}件／修正${c.edit}件／削除${c.delete}件。変更前後は「時系列履歴」の各記録と「操作履歴」で確認できます。`;$('bulkNotice').classList.remove('hidden');window.scrollTo(0,0);
+ }catch(e){alert('保存できませんでした：'+e.message);$('bulkCommit').disabled=false;}
+};
+function bulkEnter(){bulkAccountOptions();bulkTemplateOptions();}
+async function bulkInit(){
+ for(const [v,t] of Object.entries(kindLabels))$('bulkKind').append(bulkMk('option',{value:v},t));$('bulkKind').value='manual_historical';
+ bulk.accountId=state.accounts[0]?.accountId||'';bulk.templateId=PAMCore.templateIdForAccountType(state.accounts[0]?.accountType);
+ try{const d=await dbGet(BULK_DRAFT_KEY);if(d&&!bulk.rows.length&&Array.isArray(d.rows)&&d.rows.length&&PAMCore.TEMPLATES[d.templateId]&&state.accounts.some(a=>a.accountId===d.accountId)){bulk.accountId=d.accountId;bulk.templateId=d.templateId;bulk.rows=d.rows;$('bulkKind').value=d.kind||'manual_historical';$('bulkReason').value=d.reason||'';$('bulkNotice').textContent=`未保存の下書き（${new Date(d.savedAt).toLocaleString('ja-JP')}、${d.rows.length}行）を復元しました。`;$('bulkNotice').classList.remove('hidden');}}catch(e){}
+ bulkAccountOptions();bulkTemplateOptions();bulkRenderRows();
+}
+
 async function boot(){
  $('appVersion').textContent=APP_VERSION;$('footerVersion').textContent='v'+APP_VERSION;
  db=await openDB();state=await dbGet();if(!state){state=structuredClone(EMPTY);await dbPut(state);}else state={...EMPTY,...state};
- validateData(state);if(migrateStateData())await dbPut(state);render();renderTimeline();
+ validateData(state);if(migrateStateData())await dbPut(state);render();renderTimeline();try{await bulkInit();}catch(e){console.error(e);}
  $('connection').textContent=navigator.onLine?'オンライン':'オフライン';window.addEventListener('online',()=>$('connection').textContent='オンライン');window.addEventListener('offline',()=>$('connection').textContent='オフライン');
  $('offlineState').textContent='Service Worker対応';
  if('serviceWorker'in navigator){try{await navigator.serviceWorker.register('./sw.js');}catch(e){$('offlineState').textContent='登録失敗（HTTPS配信を確認）';}}

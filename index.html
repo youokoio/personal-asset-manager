@@ -19,6 +19,7 @@
 <button class="tab" data-tab="accounts">口座・残高</button>
 <button class="tab" data-tab="holdings">保有資産</button>
 <button class="tab" data-tab="timeline">時系列履歴</button>
+<button class="tab" data-tab="bulk">履歴一括入力</button>
 <button class="tab" data-tab="history">操作履歴</button>
 <button class="tab" data-tab="data">データ管理</button>
 </nav>
@@ -71,10 +72,36 @@
 <div class="panel">
 <p class="muted">残高・建玉・スワップ・決済・証券評価額などを、実際に有効だった日時で登録します。登録日時とは分けて保存し、各記録を個別に参照・修正できます。</p>
 <div class="form-grid">
-<div class="field"><label for="timelineFilterType">記録種別</label><select id="timelineFilterType"><option value="">すべて</option><option value="account_snapshot">口座スナップショット</option><option value="bank_balance">銀行残高</option><option value="fx_position">FX建玉更新</option><option value="fx_swap">FXスワップ</option><option value="fx_settlement">FX決済</option><option value="securities_snapshot">証券評価額</option><option value="contribution">入出金・積立</option><option value="mortgage">住宅ローン</option><option value="other">その他</option></select></div>
+<div class="field"><label for="timelineFilterType">記録種別</label><select id="timelineFilterType"><option value="">すべて</option><option value="crypto_snapshot">暗号資産評価</option><option value="account_snapshot">口座スナップショット</option><option value="bank_balance">銀行残高</option><option value="fx_position">FX建玉更新</option><option value="fx_swap">FXスワップ</option><option value="fx_settlement">FX決済</option><option value="securities_snapshot">証券評価額</option><option value="contribution">入出金・積立</option><option value="mortgage">住宅ローン</option><option value="other">その他</option></select></div>
 <div class="field"><label for="timelineSearch">検索</label><input id="timelineSearch" type="search" placeholder="口座・建玉・メモ"></div>
 </div>
 <div id="timelineList" class="list"></div>
+</div>
+</section>
+
+<section id="bulk" class="view hidden">
+<div id="bulkEdit">
+<div class="panel">
+<div class="section-head"><h2>履歴一括入力</h2><span id="bulkDraftState" class="muted"></span></div>
+<p class="muted">口座ごとの過去の残高・評価額などを、複数行まとめて登録・修正します。「対象日」は実際にその値だった日付、「登録日時」は保存した日時で、自動的に別々に記録されます。保存の前に必ず確認画面が表示されます。同じ日に複数行を登録することもできます。</p>
+<div id="bulkNotice" class="notice hidden" aria-live="polite"></div>
+<div class="form-grid">
+<div class="field"><label for="bulkAccount">口座</label><select id="bulkAccount"></select></div>
+<div class="field"><label for="bulkTemplate">入力項目セット</label><select id="bulkTemplate"></select></div>
+<div class="field"><label for="bulkFrom">読み込み期間（開始・任意）</label><input id="bulkFrom" type="date"></div>
+<div class="field"><label for="bulkTo">読み込み期間（終了・任意）</label><input id="bulkTo" type="date"></div>
+<div class="field"><label for="bulkKind">値の区分（新規行の初期値）</label><select id="bulkKind"></select></div>
+<div class="field"><label for="bulkReason">理由・メモ（任意・変更履歴に残ります）</label><input id="bulkReason" type="text" maxlength="300"></div>
+</div>
+<div class="bulk-toolbar"><button type="button" id="bulkLoad">既存の履歴を読み込む（編集）</button><button type="button" class="primary" id="bulkAddRow">＋ 行を追加</button><button type="button" id="bulkAddFive">＋5行</button></div>
+</div>
+<div id="bulkRows"></div>
+<div class="panel sticky-actions"><div id="bulkMsg" class="muted" aria-live="polite"></div><div class="dialog-actions"><button type="button" class="danger" id="bulkDiscard">入力を破棄</button><button type="button" class="primary" id="bulkPreview">確認画面へ</button></div></div>
+</div>
+<div id="bulkConfirm" class="hidden">
+<div class="panel"><h2>保存前の確認</h2><div id="bulkPlanSummary"></div></div>
+<div id="bulkPlanList" class="panel list"></div>
+<div class="panel sticky-actions"><div class="dialog-actions"><button type="button" id="bulkBack">戻って修正</button><button type="button" class="primary" id="bulkCommit">この内容で保存</button></div></div>
 </div>
 </section>
 
@@ -111,12 +138,13 @@
 <p id="updateStatus" class="muted" aria-live="polite"></p>
 </div>
 <div class="panel"><h2>データの初期化</h2><p class="muted">端末内の全データを削除します。必ず先にバックアップしてください。</p><button class="danger full" id="resetBtn">全データを削除</button></div>
+<div class="panel"><h2>取り込み・復元・初期化の直前の状態</h2><p class="muted">JSONの取り込み、暗号化バックアップの復元、全データ削除を行う前の状態を、端末内に1世代だけ控えとして自動保存します。誤って操作した場合は、ここから書き出せます。</p><button class="full" id="exportPreImport">直前の状態をJSONで書き出す</button></div>
 </section>
 
 <dialog id="timelineDialog"><form id="timelineForm" method="dialog">
 <div class="section-head"><h2 id="timelineTitle">時系列記録</h2><button type="button" class="icon-btn" id="closeTimeline">閉じる</button></div>
 <div class="form-grid">
-<div class="field"><label for="tlType">記録種別</label><select id="tlType"><option value="account_snapshot">口座スナップショット</option><option value="bank_balance">銀行残高</option><option value="fx_position">FX建玉更新</option><option value="fx_swap">FXスワップ</option><option value="fx_settlement">FX決済</option><option value="securities_snapshot">証券評価額</option><option value="contribution">入出金・積立</option><option value="mortgage">住宅ローン</option><option value="other">その他</option></select></div>
+<div class="field"><label for="tlType">記録種別</label><select id="tlType"><option value="crypto_snapshot">暗号資産評価</option><option value="account_snapshot">口座スナップショット</option><option value="bank_balance">銀行残高</option><option value="fx_position">FX建玉更新</option><option value="fx_swap">FXスワップ</option><option value="fx_settlement">FX決済</option><option value="securities_snapshot">証券評価額</option><option value="contribution">入出金・積立</option><option value="mortgage">住宅ローン</option><option value="other">その他</option></select></div>
 <div class="field"><label for="tlEffectiveAt">有効日時（実績日時）</label><input id="tlEffectiveAt" type="datetime-local" required></div>
 <div class="field"><label for="tlAccount">口座</label><select id="tlAccount"></select></div>
 <div class="field"><label for="tlEntity">対象ID（任意）</label><input id="tlEntity" type="text" placeholder="建玉ID・商品IDなど"></div>
@@ -126,7 +154,7 @@
 <div class="field"><label for="tlProfitLoss">損益（円）</label><input id="tlProfitLoss" type="number" step="any" inputmode="decimal"></div>
 <div class="field"><label for="tlSwap">スワップ（円）</label><input id="tlSwap" type="number" step="any" inputmode="decimal"></div>
 <div class="field"><label for="tlValueKind">値の区分</label><select id="tlValueKind"><option value="actual">実績・確定値</option><option value="manual_historical">手入力の過去実績</option><option value="estimate">推定値</option><option value="calculated">計算値</option><option value="simulation">シミュレーション</option></select></div>
-<div class="field"><label for="tlSource">登録元</label><select id="tlSource"><option value="manual">手入力</option><option value="import">インポート</option><option value="estimate">推定計算</option><option value="system">システム</option></select></div>
+<div class="field"><label for="tlSource">登録元</label><select id="tlSource"><option value="manual">手入力</option><option value="import">インポート</option><option value="estimate">推定計算</option><option value="system">システム</option><option value="bulk">一括入力</option></select></div>
 <div class="field full-width"><label for="tlMemo">メモ・根拠</label><input id="tlMemo" type="text" maxlength="500"></div>
 <div class="field full-width"><label for="tlReason">今回の修正理由（修正時）</label><input id="tlReason" type="text" maxlength="300"></div>
 </div>
@@ -161,5 +189,6 @@
 </form></dialog>
 </main>
 <footer>Personal Asset Manager <span id="footerVersion"></span> · データはこの端末内に保存</footer>
+<script src="./history-core.js" defer></script>
 <script src="./app.js" defer></script>
 </body></html>
