@@ -93,3 +93,39 @@ FX建玉の決済状態はopen/closed。closedの場合、closedQuantity=origina
 - キー `state`：従来どおりのアプリ全データ（JSONバックアップの対象）
 - キー `bulk_draft`：一括入力の下書き（バックアップ対象外）
 - キー `pre_import_backup`：取り込み・復元・全削除の直前の状態（1世代。バックアップ対象外）
+
+## v0.6.0-alpha1（schemaVersion 5）の追加項目
+追加のみ。既存項目の削除・型変更はなく、旧データは起動時に不足項目を補完して移行する（既存データは消去しない）。
+
+### 追加された配列（予約を含む）
+| 配列 | 用途 |
+|---|---|
+| fxCorrections | 決済の訂正（使用中）：correctionId, positionId, type=`reopen`, reason, at, before, after |
+| migrationHistory | 移行履歴：from, to, at, note |
+| swapRateHistory | 予約：スワップ単価（1万通貨当たり、買い・売り別）の変更履歴 |
+| liabilities | 予約：住宅ローン等の借入条件・金利履歴 |
+| loanRepayments | 予約：返済日・元金・利息・実際の引落額・繰上返済 |
+| cryptoTransactions | 予約：購入・売却・数量・単価・手数料（取得単価の計算方式は未決定） |
+
+トップレベルに `lastModifiedAt`（最終保存日時、ISO8601）を追加。
+
+### 論理削除
+cashTransactions・fees・timeSeriesRecords は `deletedAt`（ISO8601、削除時のみ）を持つ。削除済みの記録は一覧・集計・参照整合性チェックから除外され、データには残る。口座・建玉・保有資産・残高記録は物理削除だが、削除前の内容が editHistory の `before` に残る。
+
+### editHistory の action
+`create` / `edit` / `delete` / `restore` / `import` / `bulk`（履歴一括操作） / `correction`（決済の訂正）
+
+### 固定項目（登録後は通常編集で変更不可）
+口座ID、建玉ID、保有資産ID、建玉の `executionDate`・`originalExecutionRate`・`originalQuantity`。
+
+### 日時の意味
+- `effectiveDate`（YYYY-MM-DD）：取引・評価が実際に発生した日
+- `registeredAt`：アプリに最初に登録した日時（不変）
+- `updatedAt`：アプリ内で最後に変更した日時
+旧データの balanceSnapshots には registeredAt / updatedAt がない（既存データを書き換えないため）。
+
+### IndexedDB（DB名・バージョン・ストアは不変）
+キー `state`（JSONバックアップの対象） / `bulk_draft`（一括入力の下書き） / `pre_import_backup`（取り込み・復元・初期化の直前） / `pre_migration_backup`（schemaVersion移行の直前）。
+
+### JSONインポートの検証ルール
+必須配列（accounts / fxPositions / holdings / balanceSnapshots）、配列型、要素の型、ID重複、日付（YYYY-MM-DD）・日時、数値（有限の数値）、負の値、列挙値（status / side / transactionType / feeMode）、振替元・先、schemaVersion（5を超える場合は拒否）。参照先の口座が存在しない場合は、schemaVersion 5のデータはエラー、旧版データは警告（過去の口座削除で生じ得るため）。

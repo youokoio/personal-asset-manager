@@ -14,6 +14,7 @@
 <header><div><div class="eyebrow">PERSONAL ASSET MANAGER</div><h1>資産管理</h1></div><span id="connection" class="status">起動中</span></header>
 <nav aria-label="メインメニュー">
 <button class="tab active" data-tab="home">概要</button>
+<button class="tab" data-tab="trend">推移</button>
 <button class="tab" data-tab="fx">FX建玉</button>
 <button class="tab" data-tab="cash">入出金・手数料</button>
 <button class="tab" data-tab="accounts">口座・残高</button>
@@ -33,7 +34,8 @@
 </div>
 <p class="notice">初期データには確認が必要な数値が含まれます。残高・評価額は口座別に表示し、異なる口座の証拠金やロスカット条件を合算しません。</p>
 </div>
-<div class="panel"><h2>FX口座別建玉数</h2><div id="fxSummary" class="list"></div></div>
+<div class="panel"><h2>総資産・総負債・純資産</h2><div id="assetSummary"></div></div>
+<div class="panel"><h2>FX口座別（建玉数・純資産・為替差益・スワップ）</h2><div id="fxSummary" class="list"></div></div>
 <div class="panel"><h2>口座別 最新残高</h2><div id="balanceSummary" class="list"></div></div>
 <div class="panel"><h2>データ保存状態</h2><p id="storageStatus" class="muted">確認中</p></div>
 </section>
@@ -42,6 +44,7 @@
 <div class="section-head"><h2>FX建玉</h2><button class="primary" id="addPosition">＋ 建玉追加</button></div>
 <p class="notice">数量やスワップ等は建玉ごとに編集できます。数量の単位はJSONの元データに合わせて保持します。入力値の単位を必ず確認してください。</p>
 <div id="positionList" class="panel list"></div>
+<div class="panel"><h2>決済の訂正履歴</h2><div id="correctionList" class="list"></div></div>
 </section>
 
 <section id="cash" class="view hidden">
@@ -78,6 +81,21 @@
 <div id="timelineList" class="list"></div>
 </div>
 </section>
+
+<section id="trend" class="view hidden">
+<div class="panel"><h2>資産・損益の推移</h2>
+<p class="muted">登録した記録を対象日順に表示します。記録がない期間は0円や前の値で補わず、「データなし」の空白として表示します。</p>
+<div class="form-grid">
+<div class="field"><label for="trendAccount">口座</label><select id="trendAccount"></select></div>
+<div class="field"><label for="trendMetric">項目</label><select id="trendMetric"></select></div>
+<div class="field hidden" id="trendEntityWrap"><label for="trendEntity">資産（暗号資産など）</label><select id="trendEntity"></select></div>
+<div class="field"><label for="trendFrom">期間（開始）</label><input id="trendFrom" type="date"></div>
+<div class="field"><label for="trendTo">期間（終了）</label><input id="trendTo" type="date"></div>
+<div class="field"><label for="trendGap">欠損とみなす間隔</label><select id="trendGap"><option value="35">35日超（月次の記録向け）</option><option value="10">10日超（週次の記録向け）</option><option value="3">3日超（日次の記録向け）</option><option value="100">100日超</option><option value="">判定しない（すべて線で結ぶ）</option></select></div>
+</div>
+<svg id="trendSvg" class="trend-svg" viewBox="0 0 360 230" role="img" aria-label="推移グラフ"></svg>
+<p id="trendNote" class="muted"></p><p id="trendGaps" class="muted"></p>
+</div></section>
 
 <section id="bulk" class="view hidden">
 <div id="bulkEdit">
@@ -185,10 +203,18 @@
 <dialog id="editorDialog"><form id="editorForm" method="dialog">
 <div class="section-head"><h2 id="editorTitle">編集</h2><button type="button" class="icon-btn" id="closeDialog">閉じる</button></div>
 <div id="editorFields" class="form-grid"></div>
-<div class="dialog-actions"><button type="button" class="danger" id="deleteRecord">削除</button><button type="submit" class="primary">保存</button></div>
+<div class="dialog-actions"><button type="button" class="danger" id="deleteRecord">削除</button><button type="button" id="reopenPosition" class="hidden">決済の訂正</button><button type="submit" class="primary">保存</button></div>
+</form></dialog>
+<dialog id="reopenDialog"><form id="reopenForm" method="dialog">
+<div class="section-head"><h2>決済の訂正（未決済に戻す）</h2><button type="button" id="closeReopen">閉じる</button></div>
+<p class="notice">決済済みの建玉を未決済に戻します。約定日・約定数量・約定レートは変更されません。決済日・決済レート・決済損益は取り消され、訂正前後の内容が理由とともに記録されます。</p>
+<div class="field full-width"><label for="reopenReason">訂正の理由（必須）</label><textarea id="reopenReason" rows="3" maxlength="500" required></textarea></div>
+<div class="dialog-actions"><button type="submit" class="primary">理由を記録して未決済に戻す</button></div>
 </form></dialog>
 </main>
 <footer>Personal Asset Manager <span id="footerVersion"></span> · データはこの端末内に保存</footer>
 <script src="./history-core.js" defer></script>
+<script src="./store-core.js" defer></script>
+<script src="./finance-core.js" defer></script>
 <script src="./app.js" defer></script>
 </body></html>

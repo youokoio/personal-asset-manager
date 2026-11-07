@@ -29,7 +29,7 @@ const TEMPLATES={
   f('quantity','保有数量',{min:0}),f('referencePrice','参考価格',{min:0}),f('valuation','評価額',{signed:true}),f('effectivePrincipal','有効元本',{signed:true}),f('unrealizedProfitLoss','含み損益',{signed:true}),f('realizedProfitLoss','累計確定損益',{signed:true}),f('jpyBalance','取引所内日本円残高',{signed:true})]}
 };
 // 既存の口座種別から既定テンプレートを推定する（口座種別自体は変更しない）。最終的な選択は利用者が行う。
-function templateIdForAccountType(t){return t==='bank'?'bank':t==='fx'?'fx':(t==='ideco'||t==='dc')?'dc':t==='crypto'?'crypto':'securities';}
+function templateIdForAccountType(t){return (t==='bank'||t==='mortgage'||t==='loan')?'bank':t==='fx'?'fx':(t==='ideco'||t==='dc')?'dc':t==='crypto'?'crypto':'securities';}
 
 /* ---------- 数値・日付 ---------- */
 function parseNum(raw){
@@ -106,6 +106,10 @@ function planBatch(ctx){
  const byId=new Map((ctx.records||[]).map(r=>[r.recordId,r]));
  const today=ctx.today||localDateString(new Date());
  const seen=new Map();const touched=new Set();
+ const sigOf=(rec,fieldKeys)=>JSON.stringify([rec.recordType,rec.accountId,rec.entityId||'',tsDate(rec),fieldKeys.map(k=>{const v=rec.values?.[k];return v===null||v===undefined?null:Number(v);})]);
+ const fkeys=tpl.fields.map(fd=>fd.key);
+ const liveSame=(ctx.records||[]).filter(r=>!r.deletedAt&&r.accountId===ctx.accountId&&r.recordType===tpl.recordType);
+ const batchSigs=new Map();
  (ctx.rows||[]).forEach((row,i)=>{
   const raw=row.values||{};const date=String(row.date||'').trim();
   const anyValue=tpl.fields.some(fd=>String(raw[fd.key]??'').trim()!=='');
@@ -140,6 +144,13 @@ function planBatch(ctx){
   calc.warnings.forEach(m=>warnings.push({row:i,msg:m}));
   const kind=VALUE_KINDS.includes(row.valueKind)?row.valueKind:(existing?.valueKind||ctx.defaultKind||'manual_historical');
   const memo=String(row.memo||'').trim();
+  { // 重複登録の防止：同じ口座・種別・対象日・資産・数値の記録が既にある／同じ一括内に重複がある場合は保存させない
+   const probe={recordType:tpl.recordType,accountId:ctx.accountId,entityId:entityId||null,effectiveDate:date,values:calc.values};const sig=sigOf(probe,fkeys);
+   const dupExisting=liveSame.find(r=>r.recordId!==(existing&&existing.recordId)&&sigOf(r,fkeys)===sig);
+   if(dupExisting){errors.push({row:i,msg:`同じ内容の記録が既に登録されています（対象日 ${date}）。重複登録を防ぐため保存できません。`});return;}
+   if(batchSigs.has(sig)){errors.push({row:i,msg:`${batchSigs.get(sig)+1}行目と同じ内容です。重複登録を防ぐため保存できません。`});return;}
+   batchSigs.set(sig,i);
+  }
   if(date>today)warnings.push({row:i,msg:'対象日が未来の日付です。'});
   const dupKey=`${date}|${entityId||''}`;if(seen.has(dupKey))warnings.push({row:i,msg:`同じ対象日（${date}）の行が${seen.get(dupKey)+1}行目にもあります。（同日に複数回の登録は可能です）`});else seen.set(dupKey,i);
   if(existing){
@@ -162,6 +173,13 @@ function planBatch(ctx){
    items.push({row:i,action:'create',recordId:rec.recordId,before:null,after:rec,changes:[],derived:calc.derived});
   }
  });
+ // 過去日付の登録・修正：その日より後に記録がある場合は、後続データへの影響を確認できるよう通知する
+ for(const it of items.filter(x=>x.action==='create'||x.action==='edit'||x.action==='delete')){
+  const rec=it.after||it.before,d=tsDate(rec);
+  const later=(ctx.records||[]).filter(r=>!r.deletedAt&&r.accountId===ctx.accountId&&r.recordType===tpl.recordType&&(r.entityId||null)===(rec.entityId||null)&&tsDate(r)>d&&r.recordId!==it.recordId);
+  it.laterCount=later.length;
+  if(later.length)warnings.push({row:it.row,msg:`対象日 ${d} より後に ${later.length} 件の記録があります（最新 ${tsDate(later.sort((a,b)=>tsDate(a).localeCompare(tsDate(b))).pop())}）。この変更が後続の残高・評価額の連続性に影響しないか確認してください。`});
+ }
  // 同じ口座・種別・対象日に、今回の一覧に含まれない既存記録がある場合の情報
  const inGrid=new Set((ctx.rows||[]).map(r=>r.recordId).filter(Boolean));
  for(const it of items.filter(x=>x.action==='create'||x.action==='edit')){
@@ -179,6 +197,7 @@ function applyPlan(state,plan,newId){
  state.timeSeriesRecords=Array.isArray(state.timeSeriesRecords)?state.timeSeriesRecords:[];
  state.timeSeriesRevisions=Array.isArray(state.timeSeriesRevisions)?state.timeSeriesRevisions:[];
  state.editHistory=Array.isArray(state.editHistory)?state.editHistory:[];
+ if(state.editHistory.some(h=>h.recordType==='bulkHistory'&&h.recordId===plan.batchId))throw Error('この一括操作は既に保存済みです（二重保存の防止）。');
  const act=plan.items.filter(x=>x.action!=='unchanged');
  // 1) すべて検証してから、2) 変更する（途中失敗で半端な状態にしない）
  for(const it of act){
