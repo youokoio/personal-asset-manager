@@ -43,3 +43,6 @@ input[readonly]{background:#f1f3f5;color:#596674}
 .trend-svg{width:100%;height:auto;display:block;background:#fff;border:1px solid #dfe6ed;border-radius:8px;margin:10px 0}
 dialog{max-height:92vh;max-height:92dvh;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 textarea{font:inherit;width:100%;box-sizing:border-box;padding:10px;border:1px solid #c9d3dc;border-radius:8px}
+
+/* v0.6.1 */
+#importResult.report{white-space:pre-wrap;background:#eef7f0;border-left:4px solid #1b7f4b;padding:10px;border-radius:6px;font-size:13px;line-height:1.6}

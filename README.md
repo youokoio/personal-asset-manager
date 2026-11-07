@@ -1,4 +1,4 @@
-# Personal Asset Manager v0.6.0-alpha1
+# Personal Asset Manager v0.6.1-alpha1
 
 ## 概要
 - iPhone Safari / ホーム画面追加PWA向けの個人用資産管理アプリ
@@ -24,7 +24,7 @@ ZIPを展開し、以下をリポジトリ直下へアップロードしてく�
 - `manifest.webmanifest`
 - `sw.js`
 
-`README.md`、`REQUIREMENTS_v0_6.md`、`CHANGELOG_v0_6.md`、`TEST_REPORT_v0_6.md`、`TEST_CHECKLIST_v0_6.md`、`GITHUB_DEPLOY_v0_6.md`、`DATA_SCHEMA_v0_5.md`、`tests/` は説明・検証用です。公開サイトには必須ではありません。
+`README.md`、`IMPORT_CANONICAL_v1.md`、`CHANGELOG_v0_6_1.md`、`TEST_CHECKLIST_v0_6_1.md`、`REQUIREMENTS_v0_6.md`、`CHANGELOG_v0_6.md`、`TEST_REPORT_v0_6.md`、`TEST_CHECKLIST_v0_6.md`、`GITHUB_DEPLOY_v0_6.md`、`DATA_SCHEMA_v0_5.md`、`tests/` は説明・検証用です。公開サイトには必須ではありません。
 
 **個人の資産データJSONや暗号化バックアップをGitHubへアップロードしないでください。** GitHub Pagesの公開領域にはアプリのソースコードだけを置きます。
 
@@ -46,6 +46,11 @@ ZIPを展開し、以下をリポジトリ直下へアップロードしてく�
 - 入力途中の内容は端末内に自動で下書き保存され、アプリを閉じても復元されます（JSONバックアップには含まれません）。
 - 計算できる項目は自動で補完されます（例：銀行の終了残高＝開始残高＋入金−出金＋調整、証券・DCの評価額＝有効元本＋含み損益(＋現金)、暗号資産の評価額＝数量×価格）。補完した項目は「自動計算」と記録されます。入力済みの値が計算と合わない場合は警告のみで、値は書き換えません。
 - 修正の前後は各記録の「修正履歴」に、一括操作の概要は「操作履歴」に残ります。
+
+## v0.6.1：正規化JSONの取り込み
+`dataType: personal_asset_management` のJSON（一次資料を照合しながら作る正規化形式）を、「データ管理」から取り込めます。**既存データは上書き・削除せず追加のみ**で、同じJSONを再取り込みしても重複登録されません。仕様・項目の対応・重複防止ルールは `IMPORT_CANONICAL_v1.md` を参照してください。
+- 個人資産情報を含むJSONは**GitHubに上げないでください**（`.gitignore` に主なファイル名のパターンを入れています）。アプリのソースコードだけを反映してください。
+- JSONに楽天証券・iDeCo・企業型DC・暗号資産のデータが入っていない場合、それらは画面にも表示されません（アプリは推測して作りません）。
 
 ## v0.6の主な変更点
 - **保存の安全化**：変更は複製に対して行い、検証とIndexedDB保存が成功した後にだけ画面のデータへ反映します。失敗時は変更前の状態を保ち、入力ダイアログも閉じません。
