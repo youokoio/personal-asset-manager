@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='0.6.0-alpha1';
+const APP_VERSION='0.6.1-alpha1';
 const DB_NAME='pam_local_v2', STORE='state';
 const $=id=>document.getElementById(id);
 const yen=n=>Number.isFinite(Number(n))?Number(n).toLocaleString('ja-JP')+'円':'—';
@@ -62,7 +62,7 @@ function rollbackIfUnsaved(){try{if(committed&&JSON.stringify(state)!==JSON.stri
 window.addEventListener('error',rollbackIfUnsaved);window.addEventListener('unhandledrejection',rollbackIfUnsaved);
 
 function logEdit(type,id,action,before,after){state.editHistory=Array.isArray(state.editHistory)?state.editHistory:[];state.editHistory.unshift({historyId:newId('history'),timestamp:new Date().toISOString(),recordType:type,recordId:id,action,before:before?structuredClone(before):null,after:after?structuredClone(after):null});if(state.editHistory.length>PAMCore.EDIT_HISTORY_LIMIT)state.editHistory.length=PAMCore.EDIT_HISTORY_LIMIT;}
-const typeLabel={account:'口座',position:'FX建玉',snapshot:'残高記録',holding:'保有資産',cashTransaction:'入出金・振替',bulkHistory:'履歴一括入力'};
+const typeLabel={account:'口座',position:'FX建玉',snapshot:'残高記録',holding:'保有資産',cashTransaction:'入出金・振替',bulkHistory:'履歴一括入力',importLog:'JSON取り込み'};
 function recordArray(type){return type==='account'?'accounts':type==='position'?'fxPositions':type==='snapshot'?'balanceSnapshots':'holdings';}
 function recordKey(type){return type==='account'?'accountId':type==='position'?'positionId':type==='snapshot'?'snapshotId':'holdingId';}
 function findRecord(type,id){return state[recordArray(type)].find(x=>String(x[recordKey(type)])===String(id));}
@@ -79,7 +79,7 @@ function render(){
  $('holdingList').innerHTML=state.holdings.map(h=>`<div class="item"><div class="item-title">${esc(h.productName||'名称未設定')}</div><div class="item-sub">${esc(accountName(h.accountId))} ・ 評価額 ${yen(h.currentEvaluationAmount)}<br>取得額 ${yen(h.acquisitionAmount)} ／ 評価損益 ${yen(h.evaluationProfitLoss)} ・ 確認日 ${esc(h.confirmationDate||'未設定')}</div><div class="item-actions"><button data-edit="holding" data-id="${esc(h.holdingId)}">編集</button></div></div>`).join('')||'<p class="muted">保有資産がありません</p>';
  renderCash();renderAssetSummary();renderFxCorrections();
  $('historyCount').textContent=`${(state.editHistory||[]).length}件`;
- $('historyList').innerHTML=(state.editHistory||[]).map(h=>{const date=new Date(h.timestamp).toLocaleString('ja-JP');const payload=h.after||h.before||{};const title=isBulkPayload(h)?bulkTitle(h):payload.transactionType?(cashTypeLabels[payload.transactionType]||payload.transactionType):(payload.accountName||payload.currencyPair||payload.productName||(payload.accountId?accountName(payload.accountId):h.recordId));const isBulk=h.recordType==='bulkHistory';const detail=h.action==='bulk'?'一括登録・編集':h.action==='delete'?'削除':h.action==='create'?'新規保存':h.action==='correction'?'決済の訂正':h.action==='import'?'データ取り込み':'編集・訂正';return `<div class="item"><div class="item-title">${esc(typeLabel[h.recordType]||h.recordType)}：${esc(title)}</div><div class="item-sub">${esc(date)} ・ ${esc(detail)}<br>${isBulk?bulkSummary(h):`${h.before?'変更前の内容あり':'変更前データなし'} ／ ${h.after?'保存後の内容あり':'保存後データなし'}`}</div>${isBulk?'':`<div class="item-actions"><button data-history-view="${esc(h.historyId)}" data-history-side="after" ${h.after?'':'disabled'}>保存後を編集</button>${h.before?`<button data-history-view="${esc(h.historyId)}" data-history-side="before">変更前を編集</button>`:''}</div>`}</div>`;}).join('')||'<p class="muted">まだ保存・訂正履歴はありません。今後の追加・編集・削除から記録されます。</p>';
+ $('historyList').innerHTML=(state.editHistory||[]).map(h=>{const date=new Date(h.timestamp).toLocaleString('ja-JP');const payload=h.after||h.before||{};const title=isBulkPayload(h)?bulkTitle(h):payload.transactionType?(cashTypeLabels[payload.transactionType]||payload.transactionType):(payload.accountName||payload.currencyPair||payload.productName||(payload.accountId?accountName(payload.accountId):h.recordId));const isBulk=isBulkPayload(h);const detail=h.action==='bulk'?'一括登録・編集':h.action==='delete'?'削除':h.action==='create'?'新規保存':h.action==='correction'?'決済の訂正':h.action==='import'?'データ取り込み':'編集・訂正';return `<div class="item"><div class="item-title">${esc(typeLabel[h.recordType]||h.recordType)}：${esc(title)}</div><div class="item-sub">${esc(date)} ・ ${esc(detail)}<br>${isBulk?bulkSummary(h):`${h.before?'変更前の内容あり':'変更前データなし'} ／ ${h.after?'保存後の内容あり':'保存後データなし'}`}</div>${isBulk?'':`<div class="item-actions"><button data-history-view="${esc(h.historyId)}" data-history-side="after" ${h.after?'':'disabled'}>保存後を編集</button>${h.before?`<button data-history-view="${esc(h.historyId)}" data-history-side="before">変更前を編集</button>`:''}</div>`}</div>`;}).join('')||'<p class="muted">まだ保存・訂正履歴はありません。今後の追加・編集・削除から記録されます。</p>';
  $('storageStatus').textContent=`IndexedDBに保存。口座 ${state.accounts.length}件、建玉 ${state.fxPositions.length}件、残高記録 ${state.balanceSnapshots.length}件。`+(state.lastModifiedAt?` 最終保存：${new Date(state.lastModifiedAt).toLocaleString('ja-JP')}`:'');
 }
 const fields={
@@ -151,7 +151,7 @@ $('reopenForm').addEventListener('submit',async e=>{
 });
 
 $('closeDialog').onclick=()=>$('editorDialog').close();
-document.addEventListener('click',e=>{const hb=e.target.closest('[data-history-view]');if(hb){const h=(state.editHistory||[]).find(x=>x.historyId===hb.dataset.historyView);if(!h||h.recordType==='bulkHistory')return;const candidate=hb.dataset.historySide==='before'?h.before:h.after;if(!candidate){alert('選択した履歴内容がありません。');return;}if(h.recordType==='cashTransaction'){const current=(state.cashTransactions||[]).find(x=>x.transactionId===h.recordId);const seed=structuredClone(candidate);if(current)seed.transactionId=current.transactionId;openCashEditor(current?current.transactionId:null,seed);return;}const current=findRecord(h.recordType,h.recordId);const seed=structuredClone(candidate);if(current)seed[recordKey(h.recordType)]=current[recordKey(h.recordType)];openEditor(h.recordType,current?current[recordKey(h.recordType)]:null,seed);return;}const b=e.target.closest('[data-edit]');if(b)openEditor(b.dataset.edit,b.dataset.id);});
+document.addEventListener('click',e=>{const hb=e.target.closest('[data-history-view]');if(hb){const h=(state.editHistory||[]).find(x=>x.historyId===hb.dataset.historyView);if(!h||isBulkPayload(h))return;const candidate=hb.dataset.historySide==='before'?h.before:h.after;if(!candidate){alert('選択した履歴内容がありません。');return;}if(h.recordType==='cashTransaction'){const current=(state.cashTransactions||[]).find(x=>x.transactionId===h.recordId);const seed=structuredClone(candidate);if(current)seed.transactionId=current.transactionId;openCashEditor(current?current.transactionId:null,seed);return;}const current=findRecord(h.recordType,h.recordId);const seed=structuredClone(candidate);if(current)seed[recordKey(h.recordType)]=current[recordKey(h.recordType)];openEditor(h.recordType,current?current[recordKey(h.recordType)]:null,seed);return;}const b=e.target.closest('[data-edit]');if(b)openEditor(b.dataset.edit,b.dataset.id);});
 $('addPosition').onclick=()=>openEditor('position');$('addAccount').onclick=()=>openEditor('account');$('addSnapshot').onclick=()=>openEditor('snapshot');$('addHolding').onclick=()=>openEditor('holding');
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b));document.querySelectorAll('.view').forEach(x=>x.classList.toggle('hidden',x.id!==b.dataset.tab));if(b.dataset.tab==='timeline')renderTimeline();if(b.dataset.tab==='cash')renderCash();if(b.dataset.tab==='bulk')bulkEnter();if(b.dataset.tab==='trend')trendEnter();});
 function download(name,blob){const a=document.createElement('a');const u=URL.createObjectURL(blob);a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1500);}
@@ -179,6 +179,7 @@ async function replaceState(incoming){
  finishSave();
 }
 async function importData(d,{target,label}){
+ if(PAMStore.detectFormat(d).format==='canonical')return importCanonical(d,{target,label});
  const v=PAMStore.validateImport(d);
  if(v.errors.length){
   const msg=`取り込み中止：${label}に問題があります。データは一切読み込んでいません。`;
@@ -190,11 +191,57 @@ async function importData(d,{target,label}){
  if(!confirm(text))return false;
  await replaceState(d);return true;
 }
+
+
+// ===== 正規化JSON（dataType: personal_asset_management）の取り込み：検証 → 確認 → 追加のみで統合 =====
+function showReport(target,title,lines,warns=[],cls='report'){
+ const el=$(target);el.textContent='';el.classList.remove('problems','report');el.classList.add(cls);
+ const add=(t,c)=>{const d=document.createElement('div');if(c)d.className=c;d.textContent=t;el.append(d);};
+ add(title,'problems-title');lines.forEach(l=>add(l));warns.slice(0,15).forEach(w=>add('注意：'+w,'problems-warn'));if(warns.length>15)add(`…ほか ${warns.length-15} 件の注意があります。`);
+}
+function canonicalReportLines(r){
+ const L=[];
+ L.push(`口座：追加 ${r.accounts.added}件／追加なし ${r.accounts.skipped}件${r.accounts.aliased?`（うち同名の既存口座へ紐付け ${r.accounts.aliased}件）`:''}`);
+ L.push(`FX建玉：追加 ${r.positions.added}件／重複・取り込み済みのため追加なし ${r.positions.skipped}件`);
+ L.push(`残高記録：追加 ${r.snapshots.added}件／追加なし ${r.snapshots.skipped}件`);
+ const pv=r.preserved;const pp=k=>pv[k]?`${pv[k].added}件追加`:'—';
+ L.push(`原データの保持：原資料 ${pp('sourceDocuments')}／建玉イベント ${pp('fxPositionEvents')}／移行メモ ${pp('migrationNotes')}`);
+ if(r.unsupportedNonEmpty.length)L.push(`アプリに表示項目がない形式のため、原データのまま保持（画面には未表示）：${r.unsupportedNonEmpty.join('、')}`);
+ return L;
+}
+function canonicalWarnings(r,v){return [...(v?v.warnings:[]),...r.notes,...r.accounts.conflicts,...r.positions.conflicts,...r.snapshots.conflicts,...r.snapshots.sameDayDifferent,...r.positions.possibleDuplicates.slice(0,5),...(r.positions.possibleDuplicates.length>5?[`ほか ${r.positions.possibleDuplicates.length-5} 件の建玉を重複として追加しませんでした。`]:[])];}
+async function importCanonical(d,{target,label}){
+ const v=PAMStore.validateCanonical(d,{existingAccountIds:state.accounts.map(a=>a.accountId),existingPositionIds:state.fxPositions.map(p=>p.positionId)});
+ if(v.errors.length){
+  const msg=`取り込み中止：${label}に問題があります。データは一切読み込んでいません。`;
+  if(target)showProblems(target,msg,v.errors,v.warnings);else alert(msg+'\n'+v.errors.slice(0,8).join('\n')+(v.errors.length>8?`\n…ほか${v.errors.length-8}件`:''));
+  return false;
+ }
+ // 事前確認（試算：現在のデータには一切書き込まない）
+ const probe=structuredClone(state);const pre=PAMStore.mergeCanonical(probe,PAMStore.convertCanonical(d));
+ const lines=canonicalReportLines(pre);const warns=canonicalWarnings(pre,v);
+ if(pre.totalAdded===0){const t='追加するデータはありません（すべて取り込み済みです）。データは変更していません。';if(target)showReport(target,t,lines,warns);else alert(t);return false;}
+ const text=`正規化JSON（schemaVersion ${d.schemaVersion}）の検証に成功しました。\n既存のデータは上書き・削除せず、追加のみ行います。\n\n${lines.join('\n')}\n`+(warns.length?`\n確認事項：${warns.slice(0,3).join(' / ')}${warns.length>3?` …ほか${warns.length-3}件`:''}\n`:'')+'\n取り込み前の状態は、端末内に自動で控えが保存されます。\n取り込みますか？';
+ if(!confirm(text))return false;
+ await keepPreImportCopy(); // 控えを保存できない場合は中止
+ let rep=null;
+ const ok=await commitChange(draft=>{
+  const now=new Date().toISOString();rep=PAMStore.mergeCanonical(draft,PAMStore.convertCanonical(d));
+  const pc=Object.values(rep.preserved).reduce((s,r)=>s+r.added,0);
+  draft.canonicalData.importedFiles.push({importedAt:now,schemaVersion:d.schemaVersion,createdAt:d.createdAt||null,label});
+  draft.editHistory.unshift({historyId:newId('history'),timestamp:now,recordType:'importLog',recordId:newId('import'),action:'import',before:null,after:{label:'正規化JSON v'+d.schemaVersion,format:'canonical-v1',counts:{accounts:{added:rep.accounts.added,skipped:rep.accounts.skipped},positions:{added:rep.positions.added,skipped:rep.positions.skipped},snapshots:{added:rep.snapshots.added,skipped:rep.snapshots.skipped},preserved:pc}}});
+ });
+ if(!ok)return false;
+ const done='取り込みました。（取り込み前の状態は端末内に控えとして保持しています）';
+ if(target)showReport(target,done,canonicalReportLines(rep),canonicalWarnings(rep,v));else alert(done+'\n'+canonicalReportLines(rep).join('\n'));
+ return true;
+}
+
 $('importBtn').onclick=async()=>{
- const f=$('importFile').files[0];const out=$('importResult');out.classList.remove('problems');
+ const f=$('importFile').files[0];const out=$('importResult');out.classList.remove('problems','report');
  if(!f){out.textContent='JSONファイルを選択してください。';return;}
  let d;try{d=JSON.parse(await f.text());}catch(e){showProblems('importResult','取り込み中止：JSONとして読み込めません。データは一切読み込んでいません。',[String(e.message)]);return;}
- try{const done=await importData(d,{target:'importResult',label:'JSONファイル'});if(done){out.classList.remove('problems');out.textContent='取り込みました。（取り込み前の状態は端末内に控えとして保持しています）';}else if(!out.classList.contains('problems'))out.textContent='取り込みを取り消しました。データは変更されていません。';}
+ try{const fmt=PAMStore.detectFormat(d).format;out.classList.remove('report');const done=await importData(d,{target:'importResult',label:'JSONファイル'});if(done&&fmt!=='canonical'){out.classList.remove('problems');out.textContent='取り込みました。（取り込み前の状態は端末内に控えとして保持しています）';}else if(!done&&!out.classList.contains('problems')&&!out.classList.contains('report'))out.textContent='取り込みを取り消しました。データは変更されていません。';}
  catch(e){out.classList.remove('problems');out.textContent='取り込み中止：'+e.message+'（データは変更されていません）';safeRender();}
 };
 $('importEncrypted').onclick=async()=>{
@@ -349,9 +396,9 @@ let bulk={templateId:'bank',accountId:'',rows:[],plan:null},bulkTimer=null;
 const numFull=n=>Number.isFinite(Number(n))?Number(n).toLocaleString('ja-JP',{maximumFractionDigits:8}):'—';
 function fmtTsValue(key,x){return PAMCore.VALUE_LABELS[key]?.fmt==='yen'?yen(x):numFull(x);}
 function formatTsValues(v){v=v||{};return Object.keys(PAMCore.VALUE_LABELS).filter(k=>v[k]!==null&&v[k]!==undefined&&v[k]!=='').map(k=>`${PAMCore.VALUE_LABELS[k].label} ${fmtTsValue(k,v[k])}`).join(' ／ ');}
-function isBulkPayload(h){return h&&h.recordType==='bulkHistory';}
-function bulkTitle(h){const a=h.after||{};return `${accountName(a.accountId)}（${PAMCore.TEMPLATES[a.templateId]?.label||'—'}）`;}
-function bulkSummary(h){const a=h.after||{},c=a.counts||{};return `新規${c.create||0}件／修正${c.edit||0}件／削除${c.delete||0}件・一括ID ${esc(a.batchId||'')}${a.reason?'<br>理由：'+esc(a.reason):''}`;}
+function isBulkPayload(h){return h&&(h.recordType==='bulkHistory'||h.recordType==='importLog');}
+function bulkTitle(h){const a=h.after||{};if(h.recordType==='importLog')return 'JSON取り込み（'+(a.label||'正規化JSON')+'）';return `${accountName(a.accountId)}（${PAMCore.TEMPLATES[a.templateId]?.label||'—'}）`;}
+function bulkSummary(h){const a=h.after||{},c=a.counts||{};if(h.recordType==='importLog')return `口座 追加${c.accounts?.added||0}／FX建玉 追加${c.positions?.added||0}（重複除外${c.positions?.skipped||0}）／残高記録 追加${c.snapshots?.added||0}／原データ 追加${c.preserved||0}件`;return `新規${c.create||0}件／修正${c.edit||0}件／削除${c.delete||0}件・一括ID ${esc(a.batchId||'')}${a.reason?'<br>理由：'+esc(a.reason):''}`;}
 async function keepPreImportCopy(){try{await dbPut({savedAt:new Date().toISOString(),appVersion:APP_VERSION,state:structuredClone(state)},'pre_import_backup');}catch(e){throw Error('取り込み前の控えを保存できなかったため、処理を中止しました。');}}
 $('exportPreImport').onclick=async()=>{try{const b=await dbGet('pre_import_backup');if(!b||!b.state){alert('取り込み前の控えはまだありません。');return;}download('personal_asset_before_import_'+today()+'.json',new Blob([JSON.stringify({...b.state,exportDate:today()},null,2)],{type:'application/json'}));}catch(e){alert('控えを読み出せませんでした。');}};
 

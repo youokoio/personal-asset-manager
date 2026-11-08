@@ -129,3 +129,8 @@ cashTransactions・fees・timeSeriesRecords は `deletedAt`（ISO8601、削除�
 
 ### JSONインポートの検証ルール
 必須配列（accounts / fxPositions / holdings / balanceSnapshots）、配列型、要素の型、ID重複、日付（YYYY-MM-DD）・日時、数値（有限の数値）、負の値、列挙値（status / side / transactionType / feeMode）、振替元・先、schemaVersion（5を超える場合は拒否）。参照先の口座が存在しない場合は、schemaVersion 5のデータはエラー、旧版データは警告（過去の口座削除で生じ得るため）。
+
+## v0.6.1-alpha1 の追加項目（schemaVersion は5のまま）
+- `state.canonicalData`（任意）：正規化JSONから取り込んだ原データの保持領域。`sourceDocuments`・`fxPositionEvents`・`migrationNotes` ほか表示項目のない配列、`meta`（元JSONの schemaVersion・createdAt・description・rules）、`importedFiles`（取り込み日時・schemaVersion・件数）。
+- 取り込んだ口座・建玉・残高記録の追加項目（任意）：`importSource`（`canonical-v1`）、`sourceDocumentIds`、`verificationStatus`、`lots`・`quantityUnit`・`memo`・`finalSwap`・`accumulatedSwapSource`（建玉）、`memo`・`currency`（残高記録）。
+- 操作履歴：`recordType: importLog`（action `import`、件数のみ）。

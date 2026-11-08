@@ -131,7 +131,7 @@
 
 <section id="data" class="view hidden">
 <div class="panel"><h2>JSONデータの取り込み</h2>
-<p class="muted">初期データまたはバックアップを取り込みます。形式検証後、現在のデータを置き換えます。取り込み前にバックアップを作成してください。</p>
+<p class="muted">初期データまたはバックアップを取り込みます。アプリ形式のJSONは、形式検証後に現在のデータを置き換えます。正規化JSON（dataType: personal_asset_management）は、既存データを上書き・削除せず追加のみ行います。どちらも、取り込み前の状態は端末内に自動で控えが保存されます。</p>
 <input type="file" id="importFile" accept=".json,application/json">
 <button class="primary full" id="importBtn">JSONを検証して取り込む</button>
 <div id="importResult" class="muted" aria-live="polite"></div></div>
