@@ -57,6 +57,7 @@ const getKey=(page,key)=>page.evaluate(key=>new Promise((resolve,reject)=>{const
   // v4移行：控えは補完前のrawと完全一致し、控え成功後にv5を書き込む。
   page=await isolatedPage();await page.goto(base);const v4=raw(4);await putState(page,v4);await page.reload();await page.waitForFunction(()=>document.getElementById('accountCount')&&document.getElementById('accountCount').textContent!=='—');
   const migrated=await getState(page),backup=await getKey(page,'pre_migration_backup');
+  console.log('DEBUG v4 migration',JSON.stringify({migrated,backup,expected:v4,bootBlocked:await page.locator('#bootBlocked').count(),bootMessage:await page.locator('#bootBlocked').innerText().catch(()=>null)}));
   check('v4→v5 の通常移行が完了する',migrated.schemaVersion===5&&Array.isArray(migrated.migrationHistory)&&migrated.migrationHistory.length===1);
   check('移行前バックアップが補完前のrawデータと完全一致する',!!backup&&JSON.stringify(backup.state)===JSON.stringify(v4));
   await page.close();
