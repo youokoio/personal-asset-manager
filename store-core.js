@@ -9,9 +9,22 @@ const OPTIONAL_ARRAYS=['fxTransactions','fxSwapRecords','contributionRecords','c
 const NEW_ARRAYS_V5=['fxCorrections','swapRateHistory','liabilities','loanRepayments','cryptoTransactions','migrationHistory'];
 const ALL_ARRAYS=[...REQUIRED_ARRAYS,...OPTIONAL_ARRAYS,...NEW_ARRAYS_V5];
 
+/* schemaVersion は数値として厳密に判定する。未設定/nullのみ旧形式(0)として扱う。 */
+function classifySchemaVersion(raw){
+ if(raw===undefined||raw===null)return {kind:'legacy',version:0};
+ if(!Number.isInteger(raw)||raw<0)return {kind:'invalid',version:null,raw};
+ if(raw>SCHEMA_VERSION)return {kind:'future',version:raw};
+ if(raw===SCHEMA_VERSION)return {kind:'current',version:raw};
+ return {kind:'legacy',version:raw};
+}
+
 /* ---------- 移行（冪等。既存データは削除せず、不足項目の補完のみ） ---------- */
 function migrateState(state,{newId,now}){
- const steps=[];const fromVersion=Number(state.schemaVersion||0);
+ if(!state||typeof state!=='object'||Array.isArray(state))throw Error('保存データの形式が不正です。');
+ const version=classifySchemaVersion(state.schemaVersion);
+ if(version.kind==='future')throw Error(`このアプリが対応していない新しいデータ形式（schemaVersion ${version.version}）です。アプリを更新してください。`);
+ if(version.kind==='invalid')throw Error(`schemaVersion が不正です（${JSON.stringify(version.raw)}）。データを変更せず移行を中止しました。`);
+ const steps=[];const fromVersion=version.version;
  for(const k of ALL_ARRAYS)if(!Array.isArray(state[k])){state[k]=[];steps.push(`配列 ${k} を追加`);}
  for(const snap of state.balanceSnapshots)if(!snap.snapshotId){snap.snapshotId=newId('snapshot');steps.push('残高記録にIDを付与');}
  for(const p of state.fxPositions){
@@ -340,6 +353,6 @@ function mergeCanonical(state,conv){
  return rep;
 }
 
-const api={CANON_VERSION,detectFormat,validateCanonical,convertCanonical,mergeCanonical,SCHEMA_VERSION,REQUIRED_ARRAYS,OPTIONAL_ARRAYS,NEW_ARRAYS_V5,ALL_ARRAYS,ID_KEYS,LOCKED_POSITION_FIELDS,migrateState,checkIntegrity,newProblems,accountReferences,validateImport,countsOf,lostByReplace,isDate,buildPosition,reopenPosition};
+const api={CANON_VERSION,detectFormat,validateCanonical,convertCanonical,mergeCanonical,SCHEMA_VERSION,REQUIRED_ARRAYS,OPTIONAL_ARRAYS,NEW_ARRAYS_V5,ALL_ARRAYS,ID_KEYS,LOCKED_POSITION_FIELDS,classifySchemaVersion,migrateState,checkIntegrity,newProblems,accountReferences,validateImport,countsOf,lostByReplace,isDate,buildPosition,reopenPosition};
 if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.PAMStore=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

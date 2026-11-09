@@ -1,6 +1,6 @@
 'use strict';
-const APP_VERSION='0.6.1-alpha1';
-const DB_NAME='pam_local_v2', STORE='state';
+const APP_VERSION='0.6.1-alpha2';
+const DB_NAME='pam_local_v2', DB_VERSION=2, STORE='state';
 const $=id=>document.getElementById(id);
 const yen=n=>Number.isFinite(Number(n))?Number(n).toLocaleString('ja-JP')+'円':'—';
 const num=n=>Number.isFinite(Number(n))?Number(n).toLocaleString('ja-JP'):'—';
@@ -11,9 +11,50 @@ let committed=null,busy=false;
 class Invalid extends Error{} // 入力エラー（保存せず、状態も変更しない）
 
 const EMPTY={schemaVersion:5,dataType:'personal_asset_manager',exportDate:today(),accounts:[],fxPositions:[],fxTransactions:[],fxSwapRecords:[],holdings:[],balanceSnapshots:[],contributionRecords:[],cashTransactions:[],fees:[],editHistory:[],timeSeriesRecords:[],timeSeriesRevisions:[],importMetadata:{},excelHistoricalDatabase:{},excelSimulationDatabase:{},simulationMetadata:{}};
-function openDB(){return new Promise((resolve,reject)=>{const r=indexedDB.open(DB_NAME,1);r.onupgradeneeded=()=>r.result.createObjectStore(STORE);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
+function openDB(){return new Promise((resolve,reject)=>{
+ let settled=false;
+ const finish=(fn,value)=>{if(settled)return;settled=true;fn(value);};
+ const r=indexedDB.open(DB_NAME,DB_VERSION);
+ r.onupgradeneeded=()=>{const d=r.result;if(!d.objectStoreNames.contains(STORE))d.createObjectStore(STORE);};
+ r.onblocked=()=>finish(reject,new Error('旧バージョンのアプリを開いたタブが残っています。ほかのタブやホーム画面のアプリをすべて閉じてから、この画面を再読み込みしてください。データは変更していません。'));
+ r.onerror=()=>finish(reject,r.error||new Error('IndexedDBを開けませんでした。'));
+ r.onsuccess=()=>{const opened=r.result;opened.onversionchange=()=>{opened.close();};if(settled){opened.close();return;}finish(resolve,opened);};
+ });}
+
 function dbGet(key='state'){return new Promise((resolve,reject)=>{const r=db.transaction(STORE).objectStore(STORE).get(key);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
-function dbPut(value,key='state'){return new Promise((resolve,reject)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(value,key);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});}
+function dbPut(value,key='state'){
+ return new Promise((resolve,reject)=>{
+  let tx,settled=false,blockedReason=null;
+  const done=(fn,v)=>{if(settled)return;settled=true;fn(v);};
+  try{
+   tx=db.transaction(STORE,'readwrite');
+   const os=tx.objectStore(STORE);
+   tx.oncomplete=()=>done(resolve);
+   tx.onerror=()=>done(reject,tx.error||new Error('IndexedDB transaction failed.'));
+   tx.onabort=()=>done(reject,blockedReason||tx.error||new Error('IndexedDB transaction aborted.'));
+   if(key!=='state'){os.put(value,key);return;}
+   // state の読取・バージョン確認・書込を同じ readwrite transaction 内で行い、
+   // 古いタブが新しいスキーマのデータを上書きする競合を防ぐ。
+   const get=os.get('state');
+   get.onerror=()=>{try{tx.abort();}catch(_){};};
+   get.onsuccess=()=>{
+    const current=get.result;
+    if(current!==undefined){
+     if(!current||typeof current!=='object'||Array.isArray(current)){
+      blockedReason=new Error('保存先のデータ形式が不正です。安全のため上書きを拒否しました。');
+      try{tx.abort();}catch(_){};return;
+     }
+     const v=PAMStore.classifySchemaVersion(current.schemaVersion);
+     if(v.kind==='future'||v.kind==='invalid'){
+      blockedReason=new Error(v.kind==='future'?`保存先は schemaVersion ${v.version} です。このアプリの対応は ${SCHEMA_VERSION} までのため、上書きを拒否しました。`:`保存先の schemaVersion が不正（${JSON.stringify(v.raw)}）のため、上書きを拒否しました。`);
+      try{tx.abort();}catch(_){};return;
+     }
+    }
+    try{os.put(value,'state');}catch(e){try{tx.abort();}catch(_){};done(reject,e);}
+   };
+  }catch(e){done(reject,e);}
+ });
+}
 function validateData(d){
  if(!d||typeof d!=='object'||Array.isArray(d))throw Error('JSONの最上位はオブジェクトである必要があります。');
  for(const k of ['accounts','fxPositions','holdings','balanceSnapshots'])if(!Array.isArray(d[k]))throw Error(`${k} が配列ではありません。`);
@@ -571,13 +612,31 @@ function renderTrend(){
 
 async function boot(){
  $('appVersion').textContent=APP_VERSION;$('footerVersion').textContent='v'+APP_VERSION;
- db=await openDB();state=await dbGet();if(!state){state=structuredClone(EMPTY);await dbPut(state);}else state={...EMPTY,...state};
- validateData(state);
- const before=structuredClone(state);const mig=migrateStateData();
- if(mig.changed){
-  // 移行前の状態を別キーに1世代だけ控えてから、移行結果を保存する（既存データは消去しない）
-  if(mig.fromVersion<SCHEMA_VERSION){try{await dbPut({savedAt:new Date().toISOString(),fromVersion:mig.fromVersion,appVersion:APP_VERSION,state:before},'pre_migration_backup');}catch(e){console.error(e);alert('移行前の控えを保存できませんでした。通常はそのまま利用できますが、念のため先にJSONバックアップを取得してください。');}}
+ db=await openDB();
+ const raw=await dbGet();
+ if(raw===undefined){
+  state=structuredClone(EMPTY);
   await dbPut(state);
+ }else{
+  if(!raw||typeof raw!=='object'||Array.isArray(raw))throw Error('保存データの形式が不正です。データを変更せず起動を停止しました。');
+  const version=PAMStore.classifySchemaVersion(raw.schemaVersion);
+  if(version.kind==='future')throw Error(`保存データは schemaVersion ${version.version} です。このアプリの対応は ${SCHEMA_VERSION} までです。データは変更していません。アプリを更新してください。`);
+  if(version.kind==='invalid')throw Error(`保存データの schemaVersion が不正です（${JSON.stringify(version.raw)}）。データは変更していません。安全のため起動を停止しました。`);
+  // raw は一切補完・正規化する前の IndexedDB 保存値。
+  const rawCopy=structuredClone(raw);
+  state={...EMPTY,...raw};
+  // EMPTY の schemaVersion=5 で、旧データの「未設定」を誤って現行扱いしない。
+  state.schemaVersion=version.version;
+  validateData(state);
+  const mig=migrateStateData();
+  const needsPersist=mig.changed||JSON.stringify(state)!==JSON.stringify(raw);
+  if(needsPersist){
+   // 正規化・配列補完を含む保存変更の前に、元の保存値を必ず控える。
+   // 控えに失敗した場合は state を書き換えず起動を中止する。
+   try{await dbPut({savedAt:new Date().toISOString(),fromVersion:version.version,appVersion:APP_VERSION,state:rawCopy},'pre_migration_backup');}
+   catch(e){throw Error('移行前の控えを保存できなかったため、データを変更せず起動を中止しました。保存領域を確認してから再試行してください。');}
+   await dbPut(state);
+  }
  }
  committed=structuredClone(state);
  safeRender();try{await bulkInit();}catch(e){console.error(e);}
@@ -585,4 +644,8 @@ async function boot(){
  $('offlineState').textContent='Service Worker対応';
  if('serviceWorker'in navigator){try{await navigator.serviceWorker.register('./sw.js');}catch(e){$('offlineState').textContent='登録失敗（HTTPS配信を確認）';}}
 }
-boot().catch(e=>{document.body.innerHTML='<main><div class="panel"><h2>起動エラー</h2><p>'+esc(e.message)+'</p></div></main>';});
+function showBootBlocked(e){
+ const message=esc(e&&e.message||e||'不明なエラー');
+ document.body.innerHTML='<main><section id="bootBlocked" class="panel" role="alert"><h2>起動を停止しました</h2><p>'+message+'</p><p>安全のため、既存の資産データ（state）は変更していません。対応バージョンのアプリを使用するか、原因を確認してから再試行してください。</p></section></main>';
+}
+boot().catch(e=>{console.error('boot blocked',e);showBootBlocked(e);});

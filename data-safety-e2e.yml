@@ -1,0 +1,41 @@
+name: Data safety tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - fix/data-safety-guards
+    paths:
+      - 'app.js'
+      - 'store-core.js'
+      - 'sw.js'
+      - 'tests/**'
+      - '.github/workflows/data-safety-e2e.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  unit-and-browser-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Playwright
+        run: npm install --no-save --no-package-lock playwright
+
+      - name: Install Chromium and system dependencies
+        run: npx playwright install --with-deps chromium
+
+      - name: Run unit tests
+        run: node --test tests/*.test.cjs
+
+      - name: Run data safety browser tests
+        run: node tests/e2e-data-safety.cjs
